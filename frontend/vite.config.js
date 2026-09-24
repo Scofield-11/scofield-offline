@@ -16,9 +16,16 @@ export default defineConfig({
         display: 'standalone', // Bắt buộc để iPhone ẩn thanh địa chỉ
         icons: [
           {
-            src: '/icons8-crab-16.png', // Logo của bạn
-            sizes: '192x192',
-            type: 'image/png'
+            src: '/logo-180.png',
+            sizes: '180x180',
+            type: 'image/png',
+            purpose: 'apple touch icon'
+          },
+          {
+            src: '/logo-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
           }
         ]
       }
