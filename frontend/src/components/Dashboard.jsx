@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { VocabContext } from '../context/VocabContext';
+import localforage from 'localforage';
 
 function Dashboard() {
   const { sets } = useContext(VocabContext);
@@ -13,6 +14,36 @@ function Dashboard() {
 
   const [todayTests, setTodayTests] = useState(0);
   const [currentStreak, setCurrentStreak] = useState(0);
+
+  const handleExportJSON = async () => {
+    const db = await localforage.getItem('db');
+    if (!db) return alert('Chưa có dữ liệu để xuất!');
+    const blob = new Blob([JSON.stringify(db)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Scofield_Backup_${new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')}.json`;
+    a.click();
+  };
+
+  const handleImportJSON = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (window.confirm('Cảnh báo: Dữ liệu hiện tại sẽ bị ghi đè hoàn toàn. Chắc chắn tiếp tục?')) {
+          await localforage.setItem('db', data);
+          alert('✅ Phục hồi dữ liệu thành công! Ứng dụng sẽ tải lại.');
+          window.location.reload();
+        }
+      } catch (err) {
+        alert('❌ File không đúng định dạng!');
+      }
+    };
+    reader.readAsText(file);
+  };
 
   useEffect(() => {
     // Lấy 100 lịch sử gần nhất để tính toán chuỗi liên tiếp và bài làm hôm nay
@@ -192,6 +223,30 @@ function Dashboard() {
               <span className="display-6 mb-2">📝</span>
               <span className="fs-5 mt-1">Kiểm tra</span>
             </Link>
+          </div>
+        </div>
+
+        {/* Sync Data Offline */}
+        <div className="col-12 mt-4">
+          <div className="card shadow-sm border-0 rounded-4 bg-white p-3">
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
+              <div className="d-flex align-items-center gap-3">
+                <span className="fs-2">💾</span>
+                <div>
+                  <h6 className="fw-bold mb-0">Quản lý dữ liệu (Offline Mode)</h6>
+                  <small className="text-muted">Sao lưu hoặc phục hồi dữ liệu từ file JSON</small>
+                </div>
+              </div>
+              <div className="d-flex gap-2">
+                <input type="file" id="importJson" accept=".json" style={{ display: 'none' }} onChange={handleImportJSON} />
+                <button className="btn btn-outline-primary fw-bold px-4 rounded-pill" onClick={() => document.getElementById('importJson').click()}>
+                  📥 Nhập dữ liệu
+                </button>
+                <button className="btn btn-primary fw-bold px-4 rounded-pill text-white" onClick={handleExportJSON}>
+                  📤 Tải bản Backup
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
