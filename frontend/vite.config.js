@@ -16,15 +16,15 @@ export default defineConfig({
         display: 'standalone', // Bắt buộc để iPhone ẩn thanh địa chỉ
         icons: [
           {
-            src: '/logo-180.png',
+            src: '/logo-180.jpg',
             sizes: '180x180',
-            type: 'image/png',
+            type: 'image/jpeg',
             purpose: 'apple touch icon'
           },
           {
-            src: '/logo-512.png',
+            src: '/logo-512.jpg',
             sizes: '512x512',
-            type: 'image/png',
+            type: 'image/jpeg',
             purpose: 'any maskable'
           }
         ]
