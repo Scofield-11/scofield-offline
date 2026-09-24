@@ -5,12 +5,15 @@ import confetti from 'canvas-confetti';
 import api from '../api/axiosConfig';
 import TestSetup from './TestSetup';
 import TestResult from './TestResult';
+import ExamHistoryTable from './ExamHistoryTable';
+import SaveNoteModal from './SaveNoteModal';
 
 function TestMode() {
-  const { sets, allVocabs, loading, fetchSets, fetchAllVocabs } = useContext(VocabContext);
+  const { sets, setSets, allVocabs, kanjiSets, setKanjiSets, loading, fetchSets, fetchAllVocabs, fetchKanjiSets } = useContext(VocabContext);
+  const [contentType, setContentType] = useState('vocab');
   const [selectedSetId, setSelectedSetId] = useState('all');
 
-  useEffect(() => { fetchSets(); fetchAllVocabs(); }, [fetchSets, fetchAllVocabs]);
+  useEffect(() => { fetchSets(); fetchAllVocabs(); fetchKanjiSets(); }, [fetchSets, fetchAllVocabs, fetchKanjiSets]);
   
   const [poolSize, setPoolSize] = useState(0);
   const [questions, setQuestions] = useState([]);
@@ -21,71 +24,210 @@ function TestMode() {
   const [questionCount, setQuestionCount] = useState(10);
   const [questionFormat, setQuestionFormat] = useState('choice'); 
   
-  const [pairType, setPairType] = useState('word_meaning'); 
   const [isReversed, setIsReversed] = useState(false); 
+  const [kanjiFront, setKanjiFront] = useState('kanji');
+  const [kanjiBack, setKanjiBack] = useState('meaning');
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef(null);
 
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+
+  const [history, setHistory] = useState([]);
+  const [viewHistory, setViewHistory] = useState(null);
+  const [noteModalVocab, setNoteModalVocab] = useState(null);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+
+  const fetchHistory = async (reset = false) => {
+    try {
+      const skip = reset ? 0 : historyPage * 10;
+      const res = await api.get(`/test-history?skip=${skip}&limit=10`);
+      if (reset) {
+        setHistory(res.data);
+        setHistoryPage(1);
+      } else {
+        setHistory(prev => [...prev, ...res.data]);
+        setHistoryPage(prev => prev + 1);
+      }
+      setHasMoreHistory(res.data.length === 10);
+    } catch (error) {
+      toast.error("Lỗi tải lịch sử Test!");
+    }
+  };
+
+  useEffect(() => {
+    fetchHistory(true);
+  }, []);
+
+  const handleClearHistory = async () => {
+    if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử Test?")) {
+      try {
+        await api.delete('/test-history/all');
+        setHistory([]);
+        toast.success("Đã xóa lịch sử thành công!");
+      } catch (error) {
+        toast.error("Lỗi xóa lịch sử!");
+      }
+    }
+  };
+
   const vibrate = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) containerRef.current?.requestFullscreen().catch(() => toast.error("Không hỗ trợ Fullscreen"));
-    else document.exitFullscreen();
+    if (!isFullscreen) {
+      const elem = containerRef.current;
+      if (elem?.requestFullscreen) {
+        elem.requestFullscreen().catch(() => setIsFullscreen(true)); // Fallback CSS nếu API bị chặn
+      } else if (elem?.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen(); // Dành cho iOS Safari cũ
+        setIsFullscreen(true);
+      } else {
+        setIsFullscreen(true); // Fallback toàn bộ bằng CSS cho Mobile
+      }
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => setIsFullscreen(false));
+      } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+        setIsFullscreen(false);
+      } else {
+        setIsFullscreen(false); // Tắt CSS Fullscreen
+      }
+    }
   };
 
   const handleExit = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    setShowExitModal(true);
+  };
+
+  const confirmExit = () => {
+    setShowExitModal(false);
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    setIsFullscreen(false); // Dọn dẹp trạng thái
     setIsTestStarted(false);
     setIsTestFinished(false);
     window.scrollTo(0, 0);
   };
 
   useEffect(() => {
-    const handleFs = () => setIsFullscreen(!!document.fullscreenElement);
+    const handleFs = () => setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
     document.addEventListener("fullscreenchange", handleFs);
-    return () => document.removeEventListener("fullscreenchange", handleFs);
+    document.addEventListener("webkitfullscreenchange", handleFs); // Lắng nghe sự kiện của Safari
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFs);
+      document.removeEventListener("webkitfullscreenchange", handleFs);
+    };
   }, []);
 
+  // KHÓA LỐI THOÁT KHI ĐANG LÀM BÀI TEST
   useEffect(() => {
+    if (isTestStarted && !isTestFinished) {
+      window.history.pushState(null, '', window.location.href);
+      
+      const handlePopState = () => {
+        window.history.pushState(null, '', window.location.href); // Chặn back
+        setShowExitModal(true);
+      };
+      
+      const handleBeforeUnload = (e) => {
+        e.preventDefault();
+        e.returnValue = ''; // Bắt buộc để trình duyệt hiện cảnh báo chuẩn khi đóng tab
+      };
+
+      const handleLinkClick = (e) => {
+        const link = e.target.closest('a');
+        if (link && link.getAttribute('href') && !link.getAttribute('href').startsWith('#')) {
+          e.preventDefault();
+          e.stopPropagation(); // Chặn click menu nội bộ
+          setShowExitModal(true);
+        }
+      };
+
+      window.addEventListener('popstate', handlePopState);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.addEventListener('click', handleLinkClick, { capture: true });
+
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        document.removeEventListener('click', handleLinkClick, { capture: true });
+      };
+    }
+  }, [isTestStarted, isTestFinished]);
+
+  useEffect(() => {
+    let size = 0;
     if (selectedSetId === 'all') {
-      setPoolSize(allVocabs.length);
-      if (allVocabs.length < questionCount) setQuestionCount(allVocabs.length || 10);
+      size = contentType === 'kanji' ? kanjiSets.reduce((sum, s) => sum + (s.vocab_count || 0), 0) : allVocabs.length;
     } else {
-      const targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-      if (targetSet) {
-        setPoolSize(targetSet.vocabularies.length);
-        if (targetSet.vocabularies.length < questionCount) setQuestionCount(targetSet.vocabularies.length);
+      if (contentType === 'kanji') {
+        const targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
+        size = targetSet ? (targetSet.vocab_count || 0) : 0;
+      } else {
+        const targetSet = sets.find(s => s.id === parseInt(selectedSetId));
+        size = targetSet ? (targetSet.vocab_count || 0) : 0;
       }
     }
-  }, [selectedSetId, allVocabs, sets, questionCount]);
+    setPoolSize(size);
+    // Luôn set questionCount bằng tổng số từ vựng (size) mỗi khi đổi học phần
+    setQuestionCount(size || 10);
+  }, [selectedSetId, allVocabs, sets, kanjiSets, contentType]);
 
   const getQuestionText = (vocab) => {
     if (!vocab) return "";
-    if (pairType === 'word_meaning') return isReversed ? vocab.meaning : vocab.word;
-    if (pairType === 'word_furigana') return isReversed ? (vocab.furigana || vocab.word) : vocab.word;
-    if (pairType === 'furigana_meaning') return isReversed ? vocab.meaning : (vocab.furigana || vocab.word);
+    return contentType === 'kanji' ? vocab[kanjiFront] : (isReversed ? vocab.meaning : vocab.word);
   };
 
   const getAnswerText = (vocab) => {
     if (!vocab) return "";
-    if (pairType === 'word_meaning') return isReversed ? vocab.word : vocab.meaning;
-    if (pairType === 'word_furigana') return isReversed ? vocab.word : (vocab.furigana || vocab.word);
-    if (pairType === 'furigana_meaning') return isReversed ? (vocab.furigana || vocab.word) : vocab.meaning;
+    return contentType === 'kanji' ? vocab[kanjiBack] : (isReversed ? vocab.word : vocab.meaning);
   };
 
-  const generateTest = () => {
+  const generateTest = async () => {
     vibrate(40);
     let pool = [];
+    let allData = [];
+
     if (selectedSetId === 'all') {
-      const validSets = sets.filter(s => !s.title.startsWith('_Thư mục:'));
-      pool = validSets.flatMap(s => s.vocabularies);
+      if (contentType === 'kanji') {
+        const fullKanjiSets = await Promise.all(kanjiSets.map(async (s) => {
+          if (s.kanjis) return s;
+          const res = await api.get(`/kanji-sets/${s.id}`);
+          return res.data;
+        }));
+        setKanjiSets(fullKanjiSets);
+        pool = fullKanjiSets.flatMap(s => s.kanjis || []);
+        allData = pool;
+      } else {
+        pool = allVocabs;
+        allData = allVocabs;
+      }
     } else {
-      const targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-      if (targetSet) pool = targetSet.vocabularies;
+      if (contentType === 'kanji') {
+        let targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
+        if (targetSet && !targetSet.kanjis) {
+          const res = await api.get(`/kanji-sets/${targetSet.id}`);
+          targetSet = res.data;
+          setKanjiSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
+        }
+        pool = targetSet?.kanjis || [];
+        allData = kanjiSets.flatMap(s => s.kanjis || []); 
+      } else {
+        let targetSet = sets.find(s => s.id === parseInt(selectedSetId));
+        if (targetSet && !targetSet.vocabularies) {
+          const res = await api.get(`/sets/${targetSet.id}`);
+          targetSet = res.data;
+          setSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
+        }
+        pool = targetSet?.vocabularies || [];
+        allData = allVocabs;
+      }
     }
 
-    if (pool.length === 0) return toast.warning("Học phần này chưa có từ vựng nào!");
+    if (pool.length === 0) return toast.warning("Học phần này chưa có dữ liệu nào!");
 
     const shuffled = [...pool].sort(() => 0.5 - Math.random());
     const selectedVocabs = shuffled.slice(0, Math.min(questionCount, pool.length));
@@ -99,22 +241,49 @@ function TestMode() {
       
       let options = [];
       if (type === 'choice') {
-        const scoredAnswers = allVocabs.filter(v => v.id !== vocab.id).map(v => {
+        const maxSampleSize = Math.min(allData.length, 60);
+        const sampleVocabs = [...allData].sort(() => 0.5 - Math.random()).slice(0, maxSampleSize);
+        const currentText = contentType === 'kanji' ? vocab[kanjiBack] : vocab.word;
+
+        const scoredAnswers = sampleVocabs.filter(v => v.id !== vocab.id).map(v => {
             let itemScore = 0;
-            const targetChars = vocab.word.split('');
-            targetChars.forEach(c => { if (v.word.includes(c)) itemScore += 1; });
-            return { ...v, itemScore: itemScore + Math.random() * 0.5 };
-          });
+            const vText = contentType === 'kanji' ? v[kanjiBack] : v.word;
+            if (currentText && vText) {
+              currentText.split('').forEach(c => { if (vText.includes(c)) itemScore += 1; });
+            }
+            return { ...v, itemScore: itemScore + Math.random() * 1.5 }; 
+        });
           
         scoredAnswers.sort((a, b) => b.itemScore - a.itemScore);
         
         let wrongAnswers = [];
+        const normalizeStr = (text) => text.toLowerCase().replace(/[.\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(',').map(s => s.trim()).filter(Boolean).sort().join(',');
+        
+        const normalizedCorrect = normalizeStr(correctAnswer);
+        const usedNormalizedAnswers = new Set([normalizedCorrect]); 
+        
         for (let i = 0; i < scoredAnswers.length; i++) {
-          const ansStr = getAnswerText(scoredAnswers[i]);
-          if (ansStr !== correctAnswer && !wrongAnswers.includes(ansStr)) {
-            wrongAnswers.push(ansStr);
+          const rawAnsStr = getAnswerText(scoredAnswers[i]);
+          const normalizedAns = normalizeStr(rawAnsStr);
+          
+          if (!usedNormalizedAnswers.has(normalizedAns) && normalizedAns !== "") {
+            wrongAnswers.push(rawAnsStr);
+            usedNormalizedAnswers.add(normalizedAns);
           }
           if (wrongAnswers.length === 3) break;
+        }
+
+        if (wrongAnswers.length < 3) {
+          const backupVocabs = allData.sort(() => 0.5 - Math.random());
+          for (let i = 0; i < backupVocabs.length; i++) {
+            const rawAnsStr = getAnswerText(backupVocabs[i]);
+            const normalizedAns = normalizeStr(rawAnsStr);
+            if (!usedNormalizedAnswers.has(normalizedAns) && normalizedAns !== "") {
+              wrongAnswers.push(rawAnsStr);
+              usedNormalizedAnswers.add(normalizedAns);
+            }
+            if (wrongAnswers.length === 3) break;
+          }
         }
         
         options = [...wrongAnswers, correctAnswer].sort(() => 0.5 - Math.random());
@@ -126,6 +295,7 @@ function TestMode() {
     setQuestions(newQuestions);
     setIsTestStarted(true);
     setIsTestFinished(false);
+    if (!isFullscreen) toggleFullscreen();
   };
 
   const handleAnswerChange = (index, value) => {
@@ -135,29 +305,53 @@ function TestMode() {
     setQuestions(updatedQuestions);
   };
 
-  const submitTest = () => {
+  const handleAttemptSubmit = () => {
     const answeredCount = questions.filter(q => q.userAnswer.trim() !== '').length;
     if (answeredCount === 0) {
       vibrate([100, 50, 100]);
       return toast.error("Vui lòng trả lời ít nhất 1 câu trước khi nộp bài!");
     }
-    if (answeredCount < questions.length) {
-      vibrate(50);
-      if (!window.confirm(`Bạn mới hoàn thành ${answeredCount}/${questions.length} câu. Bạn có chắc chắn muốn nộp bài?`)) return;
-    }
+    setShowSubmitModal(true);
+  };
 
+  const confirmSubmitTest = () => {
+    setShowSubmitModal(false);
     let correctCount = 0;
     const gradedQuestions = questions.map(q => {
-      const clean = (str) => str.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").replace(/\s{2,}/g," ").trim().toLowerCase();
-      const isCorrect = q.correctAnswer.split(',').map(s => clean(s)).includes(clean(q.userAnswer));
-      if (isCorrect) correctCount++;
-      return { ...q, isCorrect };
-    });
+        const clean = (str) => str.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").replace(/\s{2,}/g," ").trim().toLowerCase();
+        let isCorrect = false;
+        
+        if (q.type === 'choice') {
+          isCorrect = clean(q.correctAnswer) === clean(q.userAnswer);
+        } else {
+          isCorrect = clean(q.correctAnswer) === clean(q.userAnswer) || q.correctAnswer.split(',').map(s => clean(s)).includes(clean(q.userAnswer));
+        }
+        
+        if (isCorrect) correctCount++;
+        return { ...q, isCorrect };
+      });
 
     setQuestions(gradedQuestions);
     setScore({ correct: correctCount, total: gradedQuestions.length });
     setIsTestFinished(true);
     window.scrollTo(0, 0);
+
+    // LƯU LỊCH SỬ TEST
+    const setName = selectedSetId === 'all' ? 'Tất cả từ vựng' : (sets.find(s => s.id === parseInt(selectedSetId))?.title || 'Học phần tùy chỉnh');
+    const wrongDetails = gradedQuestions.filter(q => !q.isCorrect).map(q => ({
+      question: q.questionText,
+      correct_ans: q.correctAnswer,
+      user_ans: q.userAnswer,
+      vocabId: q.id 
+    }));
+    
+    api.post('/test-history', {
+      set_id: selectedSetId === 'all' ? null : parseInt(selectedSetId),
+      title: `Test: ${setName}`,
+      score: correctCount,
+      total: gradedQuestions.length,
+      wrong_details: wrongDetails
+    }).then(() => fetchHistory(true)).catch(() => toast.error("Lỗi lưu lịch sử!"));
     
     const ratio = correctCount / gradedQuestions.length;
     if (ratio >= 0.8) {
@@ -185,15 +379,76 @@ function TestMode() {
     </div>
   );
 
+  if (viewHistory) {
+    return (
+      <div className="container mt-4 fade-in-slide" style={{ maxWidth: '800px' }}>
+        {noteModalVocab && <SaveNoteModal vocab={noteModalVocab} sets={sets} onClose={() => setNoteModalVocab(null)} onSaveSuccess={() => fetchSets(false, true)} />}
+        <button className="btn btn-outline-secondary fw-bold rounded-pill mb-4 px-4 shadow-sm" onClick={() => setViewHistory(null)}>← Quay lại danh sách</button>
+        <div className="alert alert-info shadow-sm border-0 mb-4 rounded-4 p-4">
+          <h4 className="fw-bold mb-3 text-primary">{viewHistory.title}</h4>
+          <p className="mb-0 text-dark">
+            Ngày làm: <strong>{viewHistory.date}</strong> <br/>
+            Kết quả: <strong className="text-primary fs-5">{viewHistory.score} / {viewHistory.total}</strong>
+          </p>
+        </div>
+        
+        {viewHistory.wrongDetails && viewHistory.wrongDetails.length === 0 ? (
+          <div className="alert alert-success fw-bold p-4 rounded-4 shadow-sm border-0">Tuyệt vời! Bạn không làm sai câu nào trong phiên này.</div>
+        ) : (
+          <div>
+            <h5 className="text-danger fw-bold mb-4">Các câu làm sai:</h5>
+            {viewHistory.wrongDetails && viewHistory.wrongDetails.map((q, i) => (
+              <div key={i} className="bg-white rounded-4 shadow-sm mb-4 p-4" style={{ transform: 'none' }}>
+                <div className="d-flex justify-content-between align-items-start mb-3">
+                  <h5 className="mb-0 text-dark fw-bold">{q.question}</h5>
+                  {q.vocabId && (
+                    <button className="btn btn-light rounded-circle shadow-sm border-0 fs-5 d-flex align-items-center justify-content-center transition-all hover-scale ms-3 text-nowrap" style={{ width: '40px', height: '40px', color: '#8a2be2', flexShrink: 0 }} onClick={() => {
+                      let vocab = allVocabs.find(v => v.id === q.vocabId);
+                      if (vocab) {
+                        setNoteModalVocab(vocab);
+                      } else {
+                        const kSets = kanjiSets.flatMap(s => s.kanjis);
+                        vocab = kSets.find(v => v.id === q.vocabId);
+                        if (vocab) setNoteModalVocab({ word: vocab.kanji, furigana: vocab.hiragana, meaning: vocab.meaning });
+                      }
+                    }} title="Lưu vào Note">
+                      📓
+                    </button>
+                  )}
+                </div>
+                <div className="p-3 rounded-3 bg-light border shadow-sm mb-3">
+                  <span className="text-muted fw-bold d-block mb-1 fs-6">Lựa chọn của bạn:</span>
+                  <span className="text-danger fw-bold text-decoration-line-through fs-5">{q.user_ans || '(Bỏ trống)'}</span>
+                </div>
+                <div className="p-3 rounded-3 bg-white border border-success border-2 shadow-sm">
+                  <span className="text-success fw-bold d-block mb-1 fs-6">✓ Đáp án đúng:</span>
+                  <span className="text-dark fw-bold fs-5">{q.correct_ans}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (!isTestStarted) {
     return (
-      <TestSetup 
-        sets={sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId}
-        questionCount={questionCount} setQuestionCount={setQuestionCount} poolSize={poolSize}
-        questionFormat={questionFormat} setQuestionFormat={setQuestionFormat}
-        pairType={pairType} setPairType={setPairType} isReversed={isReversed} setIsReversed={setIsReversed}
-        generateTest={generateTest}
-      />
+      <>
+        <TestSetup 
+          sets={sets} kanjiSets={kanjiSets} contentType={contentType} setContentType={setContentType}
+          selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId}
+          questionCount={questionCount} setQuestionCount={setQuestionCount} poolSize={poolSize}
+          questionFormat={questionFormat} setQuestionFormat={setQuestionFormat}
+          isReversed={isReversed} setIsReversed={setIsReversed}
+          kanjiFront={kanjiFront} setKanjiFront={setKanjiFront}
+          kanjiBack={kanjiBack} setKanjiBack={setKanjiBack}
+          generateTest={generateTest}
+        />
+        <div className="container mb-5" style={{ maxWidth: '650px' }}>
+          <ExamHistoryTable history={history} setViewHistory={setViewHistory} handleClearHistory={handleClearHistory} onLoadMore={() => fetchHistory(false)} hasMore={hasMoreHistory} />
+        </div>
+      </>
     );
   }
 
@@ -211,16 +466,27 @@ function TestMode() {
 
   if (isTestFinished) {
     return (
-      <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light overflow-auto' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh' } : {}}>
+      <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : {}}>
+        {noteModalVocab && <SaveNoteModal vocab={noteModalVocab} sets={sets} onClose={() => setNoteModalVocab(null)} onSaveSuccess={() => fetchSets(false, true)} />}
         <div className="d-flex justify-content-between align-items-center mx-auto mb-4 d-print-none" style={{ maxWidth: '800px' }}>
-          <button className="btn btn-outline-secondary fw-bold rounded-pill shadow-sm px-4 hover-bg-light transition-all" onClick={handleExit}>
+          <button className="btn btn-outline-secondary fw-bold rounded-pill shadow-sm px-4 hover-bg-light transition-all" onClick={() => { setIsTestStarted(false); setIsTestFinished(false); window.scrollTo(0,0); }}>
             ← Đóng kết quả
           </button>
           <button className="btn btn-light rounded-circle shadow-sm border-0 hover-bg-light transition-all" onClick={toggleFullscreen} title="Toàn màn hình (F)">
             {isFullscreen ? '↙️' : '⛶'}
           </button>
         </div>
-        <TestResult score={score} questions={questions} onRestart={() => { setIsTestStarted(false); setIsTestFinished(false); window.scrollTo(0,0); }} onCreateMistakeSet={handleCreateMistakeSet} />
+        <TestResult score={score} questions={questions} onRestart={() => { setIsTestStarted(false); setIsTestFinished(false); window.scrollTo(0,0); }} onCreateMistakeSet={handleCreateMistakeSet} onSaveNote={(vocabId) => {
+          const allData = contentType === 'kanji' ? kanjiSets.flatMap(s => s.kanjis) : allVocabs;
+          const vocab = allData.find(v => v.id === vocabId);
+          if (vocab) {
+            if (contentType === 'kanji') {
+              setNoteModalVocab({ word: vocab.kanji, furigana: vocab.hiragana, meaning: vocab.meaning });
+            } else {
+              setNoteModalVocab(vocab);
+            }
+          }
+        }} />
       </div>
     );
   }
@@ -228,7 +494,36 @@ function TestMode() {
   const answeredCount = questions.filter(q => q.userAnswer.trim() !== '').length;
 
   return (
-    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light overflow-auto' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh' } : {}}>
+    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light overflow-auto mobile-fullscreen' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh' } : {}}>
+      
+      {/* MODAL XÁC NHẬN THOÁT */}
+      {showExitModal && (
+        <div className="modal d-flex align-items-center justify-content-center fade-in" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+          <div className="card border-0 shadow-lg rounded-4 p-4 text-center" style={{ width: '90%', maxWidth: '400px' }}>
+            <h4 className="fw-bold text-danger mb-3">Cảnh báo</h4>
+            <p className="text-dark mb-4 fs-5">Bạn đang làm bài kiểm tra. Nếu thoát, kết quả hiện tại sẽ bị hủy và không được lưu lại. Bạn có chắc chắn muốn thoát?</p>
+            <div className="d-flex gap-3">
+              <button className="btn btn-danger fw-bold w-50 py-2 rounded-3" onClick={confirmExit}>Hủy bài thi</button>
+              <button className="btn btn-secondary fw-bold w-50 py-2 rounded-3" onClick={() => setShowExitModal(false)}>Tiếp tục làm bài</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN NỘP BÀI */}
+      {showSubmitModal && (
+        <div className="modal d-flex align-items-center justify-content-center fade-in" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+          <div className="card border-0 shadow-lg rounded-4 p-4 text-center" style={{ width: '90%', maxWidth: '400px' }}>
+            <h4 className="fw-bold text-primary mb-3">Nộp bài</h4>
+            <p className="text-dark mb-4 fs-5">Bạn đã hoàn thành <strong className="text-success">{answeredCount}/{questions.length}</strong> câu. Bạn có chắc chắn muốn kết thúc bài thi?</p>
+            <div className="d-flex gap-3">
+              <button className="btn btn-secondary fw-bold w-50 py-2 rounded-3" onClick={() => setShowSubmitModal(false)}>Hủy</button>
+              <button className="btn btn-primary fw-bold w-50 py-2 rounded-3" onClick={confirmSubmitTest}>Kết thúc bài thi</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="mx-auto" style={{ maxWidth: '1100px' }}>
         
         {/* THANH TOP ĐIỀU HƯỚNG */}
@@ -289,7 +584,7 @@ function TestMode() {
               </div>
             ))}
 
-            <button className="btn btn-success btn-lg px-5 py-4 fw-bold w-100 shadow-lg d-print-none mt-2 hover-scale transition-all" style={{ borderRadius: '16px', fontSize: '1.3rem' }} onClick={submitTest}>
+            <button className="btn btn-success btn-lg px-5 py-4 fw-bold w-100 shadow-lg d-print-none mt-2 hover-scale transition-all" style={{ borderRadius: '16px', fontSize: '1.3rem' }} onClick={handleAttemptSubmit}>
               Nộp bài ngay
             </button>
           </div>
@@ -304,7 +599,7 @@ function TestMode() {
                   <div className="progress-bar bg-success" role="progressbar" style={{ width: `${(answeredCount / questions.length) * 100}%` }}></div>
                 </div>
                 
-                <div className="d-flex flex-wrap gap-2 justify-content-center" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '5px' }}>
+                <div className="d-flex flex-wrap gap-2 justify-content-center" style={{ maxHeight: '55dvh', overflowY: 'auto', paddingRight: '5px', paddingBottom: '20px' }}>
                   {questions.map((q, idx) => {
                     const isAnswered = q.userAnswer.trim() !== '';
                     return (

@@ -7,12 +7,15 @@ import LoadingSkeleton from './LoadingSkeleton';
 import confetti from 'canvas-confetti';
 import api from '../api/axiosConfig';
 import { playSound } from '../utils/audio'; // Import âm thanh
+import SetSelector from './SetSelector';
+import ContentTypeSelector from './ContentTypeSelector';
 
 function FlashcardMode() {
-  const { sets, loading, fetchSets } = useContext(VocabContext);
+  const { sets, setSets, kanjiSets, setKanjiSets, allVocabs, loading, fetchSets, fetchKanjiSets, fetchAllVocabs } = useContext(VocabContext);
+  const [contentType, setContentType] = useState('vocab');
   const [selectedSetId, setSelectedSetId] = useState('all');
 
-  useEffect(() => { fetchSets(); }, [fetchSets]);
+  useEffect(() => { fetchSets(); fetchKanjiSets(); fetchAllVocabs(); }, [fetchSets, fetchKanjiSets, fetchAllVocabs]);
   
   const [vocabsToStudy, setVocabsToStudy] = useState([]);
   const [isStarted, setIsStarted] = useState(false);
@@ -24,11 +27,20 @@ function FlashcardMode() {
 
   const [autoPlay, setAutoPlay] = useState(() => localStorage.getItem("flashcardAutoPlay") === "true");
   const [isSlideshow, setIsSlideshow] = useState(false);
-  const [showFuriganaHint, setShowFuriganaHint] = useState(true);
-  const [frontSide, setFrontSide] = useState('word');
-  const [backSide, setBackSide] = useState('meaning');
+  const [isReversed, setIsReversed] = useState(false);
+  const [kanjiFront, setKanjiFront] = useState('kanji');
+  const [kanjiBack, setKanjiBack] = useState('meaning');
   
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const handleSwap = () => {
+    if (contentType === 'kanji') {
+      setKanjiFront(kanjiBack);
+      setKanjiBack(kanjiFront);
+    } else {
+      setIsReversed(!isReversed);
+    }
+  };
   const containerRef = useRef(null);
 
   // States dành cho tính năng Vuốt trên Mobile
@@ -39,23 +51,49 @@ function FlashcardMode() {
 
   const vibrate = (ms = 40) => { if (navigator.vibrate) navigator.vibrate(ms); };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     let pool = [];
+
     if (selectedSetId === 'all') {
-      const validSets = sets.filter(s => !s.title.startsWith('_Thư mục:'));
-      pool = validSets.flatMap(s => s.vocabularies);
+      if (contentType === 'kanji') {
+        const fullKanjiSets = await Promise.all(kanjiSets.map(async (s) => {
+          if (s.kanjis) return s;
+          const res = await api.get(`/kanji-sets/${s.id}`);
+          return res.data;
+        }));
+        setKanjiSets(fullKanjiSets);
+        pool = fullKanjiSets.flatMap(s => s.kanjis || []);
+      } else {
+        pool = allVocabs;
+      }
     } else {
-      const targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-      if (targetSet) pool = targetSet.vocabularies;
+      if (contentType === 'kanji') {
+        let targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
+        if (targetSet && !targetSet.kanjis) {
+          const res = await api.get(`/kanji-sets/${targetSet.id}`);
+          targetSet = res.data;
+          setKanjiSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
+        }
+        pool = targetSet?.kanjis || [];
+      } else {
+        let targetSet = sets.find(s => s.id === parseInt(selectedSetId));
+        if (targetSet && !targetSet.vocabularies) {
+          const res = await api.get(`/sets/${targetSet.id}`);
+          targetSet = res.data;
+          setSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
+        }
+        pool = targetSet?.vocabularies || [];
+      }
     }
 
-    if (pool.length === 0) return toast.warning("Học phần này chưa có từ vựng!");
+    if (pool.length === 0) return toast.warning("Học phần này chưa có dữ liệu!");
 
     setVocabsToStudy(pool);
     setCurrentIndex(0);
     setIsStarted(true);
     setIsFinished(false);
     setIsSlideshow(false); 
+    if (!isFullscreen) toggleFullscreen();
   };
 
   const handleNext = useCallback(() => {
@@ -86,10 +124,25 @@ function FlashcardMode() {
   };
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => toast.error("Trình duyệt không hỗ trợ Fullscreen"));
+    if (!isFullscreen) {
+      const elem = containerRef.current;
+      if (elem?.requestFullscreen) {
+        elem.requestFullscreen().catch(() => setIsFullscreen(true));
+      } else if (elem?.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        setIsFullscreen(true);
+      }
     } else {
-      document.exitFullscreen();
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => setIsFullscreen(false));
+      } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+        setIsFullscreen(false);
+      } else {
+        setIsFullscreen(false);
+      }
     }
   };
 
@@ -116,9 +169,13 @@ function FlashcardMode() {
   };
 
   useEffect(() => {
-    const handleFs = () => setIsFullscreen(!!document.fullscreenElement);
+    const handleFs = () => setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
     document.addEventListener("fullscreenchange", handleFs);
-    return () => document.removeEventListener("fullscreenchange", handleFs);
+    document.addEventListener("webkitfullscreenchange", handleFs);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFs);
+      document.removeEventListener("webkitfullscreenchange", handleFs);
+    };
   }, []);
 
   useEffect(() => {
@@ -145,7 +202,11 @@ function FlashcardMode() {
   const handleQuickSave = async (e) => {
     e.preventDefault();
     try {
-      await api.put(`/vocabularies/${editingVocab.id}`, editingVocab);
+      if (contentType === 'kanji') {
+        await api.put(`/kanji/${editingVocab.id}`, editingVocab);
+      } else {
+        await api.put(`/vocabularies/${editingVocab.id}`, editingVocab);
+      }
       setVocabsToStudy(prev => {
         const newArr = [...prev];
         newArr[currentIndex] = editingVocab;
@@ -159,54 +220,62 @@ function FlashcardMode() {
   if (loading) return <LoadingSkeleton />;
 
   if (!isStarted) {
-    const validSets = sets.filter(s => !s.title.startsWith('_Thư mục:'));
-    const groupedSets = validSets.reduce((acc, set) => {
-      const folder = set.folder_path || '🏠 Thư mục gốc';
-      if (!acc[folder]) acc[folder] = [];
-      acc[folder].push(set);
-      return acc;
-    }, {});
-
     return (
       <div className="container mt-5 fade-in-slide" style={{ maxWidth: '600px' }}>
         <div className="card shadow-sm border-0 p-4 p-md-5 rounded-4 bg-white" style={{ borderRadius: '24px' }}>
           <h3 className="text-center mb-5 fw-bold text-dark" style={{ opacity: 0.8 }}>Thiết lập Flashcards</h3>
           
           <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-2">Chọn học phần muốn ôn:</label>
-            <select className="form-select form-select-lg bg-light border-0 fw-bold text-dark shadow-sm" style={{ borderRadius: '12px', height: '56px' }} value={selectedSetId} onChange={(e) => setSelectedSetId(e.target.value)}>
-              <option value="all">-- Tất cả từ vựng --</option>
-              {Object.entries(groupedSets).map(([folder, folderSets]) => (
-                <optgroup key={folder} label={folder}>
-                  {folderSets.map(s => <option key={s.id} value={s.id}>{s.title} ({s.vocabularies.length} từ)</option>)}
-                </optgroup>
-              ))}
-            </select>
+            <label className="form-label fw-bold text-muted mb-2">1. Chọn loại nội dung:</label>
+            <ContentTypeSelector contentType={contentType} setContentType={setContentType} />
           </div>
 
-          <div className="row g-3 mb-4">
-            <div className="col-6">
-              <label className="form-label fw-bold text-muted small">MẶT TRƯỚC HIỂN THỊ:</label>
-              <select className="form-select bg-light border-0 fw-bold text-primary shadow-sm" style={{ borderRadius: '12px' }} value={frontSide} onChange={(e) => setFrontSide(e.target.value)}>
-                <option value="word">Từ vựng (Kanji/Gốc)</option>
-                <option value="furigana">Phiên âm (Hiragana/IPA)</option>
-                <option value="meaning">Ý nghĩa (Tiếng Việt)</option>
-              </select>
-            </div>
-            <div className="col-6">
-              <label className="form-label fw-bold text-muted small">MẶT SAU HIỂN THỊ:</label>
-              <select className="form-select bg-light border-0 fw-bold text-primary shadow-sm" style={{ borderRadius: '12px' }} value={backSide} onChange={(e) => setBackSide(e.target.value)}>
-                <option value="meaning">Ý nghĩa (Tiếng Việt)</option>
-                <option value="furigana">Phiên âm (Hiragana/IPA)</option>
-                <option value="word">Từ vựng (Kanji/Gốc)</option>
-              </select>
-            </div>
+          <div className="mb-4">
+            <label className="form-label fw-bold text-muted mb-2">2. Chọn học phần muốn ôn:</label>
+            <SetSelector sets={contentType === 'kanji' ? kanjiSets : sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
           </div>
 
           <div className="mb-5 d-flex flex-column gap-3">
-            <div className="form-check form-switch fs-6 d-flex align-items-center gap-3 bg-light p-3 rounded-4 border-0 shadow-sm">
-              <input className="form-check-input m-0 shadow-sm" type="checkbox" id="furiganaToggle" checked={showFuriganaHint} onChange={(e) => setShowFuriganaHint(e.target.checked)} style={{ cursor: 'pointer' }} />
-              <label className="form-check-label fw-bold text-dark m-0" htmlFor="furiganaToggle" style={{ cursor: 'pointer' }}>Hiển thị phiên âm nhỏ (Hint) trên mặt thẻ Từ vựng</label>
+            <div className="d-flex align-items-center justify-content-between bg-light p-3 rounded-4 border-0 shadow-sm transition-all">
+              <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
+                <span className="text-muted small fw-bold d-block mb-1 text-truncate">MẶT TRƯỚC</span>
+                {contentType === 'kanji' ? (
+                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1" style={{ color: '#8a2be2', maxWidth: '140px' }} value={kanjiFront} onChange={(e) => setKanjiFront(e.target.value)}>
+                    <option value="kanji" className="text-dark">Hán tự</option>
+                    <option value="hanviet" className="text-dark">Hán Việt</option>
+                    <option value="hiragana" className="text-dark">Phiên âm</option>
+                    <option value="meaning" className="text-dark">Ý nghĩa</option>
+                  </select>
+                ) : (
+                  <span className="fw-bold fs-5 text-truncate d-block mt-2" style={{ color: '#8a2be2' }}>{isReversed ? 'Ý nghĩa' : 'Từ vựng'}</span>
+                )}
+              </div>
+              
+              <div className="px-2 px-md-3" style={{ flexShrink: 0 }}>
+                <button 
+                  type="button"
+                  className="btn btn-warning rounded-circle shadow-sm fw-bold d-flex align-items-center justify-content-center transition-all hover-scale m-0" 
+                  style={{width: '48px', height: '48px', fontSize: '1.2rem'}}
+                  onClick={handleSwap}
+                  title="Đảo chiều thẻ"
+                >
+                  🔄
+                </button>
+              </div>
+              
+              <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
+                <span className="text-muted small fw-bold d-block mb-1 text-truncate">MẶT SAU</span>
+                {contentType === 'kanji' ? (
+                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1 text-success" style={{ maxWidth: '140px' }} value={kanjiBack} onChange={(e) => setKanjiBack(e.target.value)}>
+                    <option value="kanji" className="text-dark">Hán tự</option>
+                    <option value="hanviet" className="text-dark">Hán Việt</option>
+                    <option value="hiragana" className="text-dark">Phiên âm</option>
+                    <option value="meaning" className="text-dark">Ý nghĩa</option>
+                  </select>
+                ) : (
+                  <span className="fw-bold text-success fs-5 text-truncate d-block mt-2">{isReversed ? 'Từ vựng' : 'Ý nghĩa'}</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -232,7 +301,7 @@ function FlashcardMode() {
             <p className="fs-5 opacity-75 mb-4">Bạn đã ôn tập xong <strong>{vocabsToStudy.length}</strong> thẻ từ vựng.</p>
             <div className="d-flex flex-column gap-3">
               <button className="btn btn-warning py-3 fw-bold text-dark fs-5 shadow-sm rounded-4 hover-scale" onClick={handleShuffle}>🔀 Trộn & Học lại</button>
-              <button className="btn btn-light py-3 fw-bold fs-5 text-primary shadow-sm rounded-4 hover-scale" onClick={() => setIsStarted(false)}>Học phần khác</button>
+              <button className="btn btn-light py-3 fw-bold fs-5 text-primary shadow-sm rounded-4 hover-scale" onClick={() => { setIsStarted(false); setIsFullscreen(false); }}>Học phần khác</button>
             </div>
           </div>
           <div className="position-absolute bg-white opacity-10 rounded-circle" style={{ width: '200px', height: '200px', top: '-50px', right: '-50px' }}></div>
@@ -243,16 +312,26 @@ function FlashcardMode() {
   }
 
   return (
-    <div className={`container-fluid py-4 text-center transition-all ${isFullscreen ? 'bg-light d-flex flex-column justify-content-center align-items-center' : ''}`} ref={containerRef} style={isFullscreen ? { height: '100vh', overflow: 'hidden' } : {}}>
+    <div className={`container-fluid py-4 text-center transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : {}}>
       
       {editingVocab && (
         <div className="modal d-flex align-items-center justify-content-center fade-in" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1060, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
           <div className="card border-0 shadow-lg rounded-4 p-4" style={{ width: '90%', maxWidth: '400px' }}>
             <h5 className="fw-bold mb-4" style={{ color: '#8a2be2' }}>✏️ Sửa nhanh thẻ</h5>
             <form onSubmit={handleQuickSave}>
-              <input type="text" className="form-control bg-light border-0 mb-3 fw-bold shadow-sm" value={editingVocab.word} onChange={e => setEditingVocab({...editingVocab, word: e.target.value})} placeholder="Từ vựng/Kanji" required />
-              <input type="text" className="form-control bg-light border-0 mb-3 shadow-sm" value={editingVocab.furigana || ''} onChange={e => setEditingVocab({...editingVocab, furigana: e.target.value})} placeholder="Phiên âm/Hiragana" />
-              <input type="text" className="form-control bg-light border-0 mb-4 shadow-sm" value={editingVocab.meaning} onChange={e => setEditingVocab({...editingVocab, meaning: e.target.value})} placeholder="Ý nghĩa" required />
+              {contentType === 'kanji' ? (
+                <>
+                  <input type="text" className="form-control bg-light border-0 mb-3 fw-bold shadow-sm" value={editingVocab.kanji} onChange={e => setEditingVocab({...editingVocab, kanji: e.target.value})} placeholder="Kanji" required />
+                  <input type="text" className="form-control bg-light border-0 mb-3 shadow-sm" value={editingVocab.hanviet} onChange={e => setEditingVocab({...editingVocab, hanviet: e.target.value})} placeholder="Hán Việt" required />
+                  <input type="text" className="form-control bg-light border-0 mb-3 shadow-sm" value={editingVocab.hiragana} onChange={e => setEditingVocab({...editingVocab, hiragana: e.target.value})} placeholder="Hiragana" required />
+                  <input type="text" className="form-control bg-light border-0 mb-4 shadow-sm" value={editingVocab.meaning} onChange={e => setEditingVocab({...editingVocab, meaning: e.target.value})} placeholder="Ý nghĩa" required />
+                </>
+              ) : (
+                <>
+                  <input type="text" className="form-control bg-light border-0 mb-3 fw-bold shadow-sm" value={editingVocab.word} onChange={e => setEditingVocab({...editingVocab, word: e.target.value})} placeholder="Từ vựng" required />
+                  <input type="text" className="form-control bg-light border-0 mb-4 shadow-sm" value={editingVocab.meaning} onChange={e => setEditingVocab({...editingVocab, meaning: e.target.value})} placeholder="Ý nghĩa" required />
+                </>
+              )}
               <div className="d-flex gap-2">
                 <button type="button" className="btn btn-secondary w-50 fw-bold rounded-3" onClick={() => setEditingVocab(null)}>Hủy</button>
                 <button type="submit" className="btn w-50 fw-bold text-white rounded-3" style={{ backgroundColor: '#8a2be2' }}>Lưu lại</button>
@@ -291,11 +370,18 @@ function FlashcardMode() {
         <Flashcard 
           vocab={vocabsToStudy[currentIndex]} 
           autoPlay={autoPlay} 
-          frontSide={frontSide}
-          backSide={backSide}
-          showFuriganaHint={showFuriganaHint}
+          contentType={contentType}
+          isReversed={isReversed}
+          kanjiFront={kanjiFront}
+          kanjiBack={kanjiBack}
           onEdit={setEditingVocab}
-          onSaveNote={setNoteModalVocab} 
+          onSaveNote={(item) => {
+            if (contentType === 'kanji') {
+              setNoteModalVocab({ word: item.kanji, furigana: item.hiragana, meaning: item.meaning });
+            } else {
+              setNoteModalVocab(item);
+            }
+          }} 
         />
       </div>
       

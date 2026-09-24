@@ -1,6 +1,6 @@
 import React from 'react';
 
-function TestResult({ score, questions, onRestart, onCreateMistakeSet }) {
+function TestResult({ score, questions, onRestart, onCreateMistakeSet, onSaveNote }) {
   const percent = Math.round((score.correct / score.total) * 100);
   const wrongCount = score.total - score.correct;
   
@@ -47,10 +47,17 @@ function TestResult({ score, questions, onRestart, onCreateMistakeSet }) {
       {questions.map((q, idx) => (
         <div key={idx} className={`card mb-4 border-0 shadow-sm rounded-4 ${q.isCorrect ? 'bg-light' : 'bg-danger'}`} style={{ '--bs-bg-opacity': q.isCorrect ? 1 : 0.05, breakInside: 'avoid' }}>
           <div className="card-body p-4 p-md-5">
-            <h5 className="card-title fw-bold mb-4" style={{ lineHeight: '1.5' }}>
-              <span className={`badge me-2 ${q.isCorrect ? 'bg-success' : 'bg-danger'}`}>{idx + 1}</span> 
-              {q.questionText}
-            </h5>
+            <div className="d-flex justify-content-between align-items-start mb-4">
+              <h5 className="card-title fw-bold m-0" style={{ lineHeight: '1.5' }}>
+                <span className={`badge me-2 ${q.isCorrect ? 'bg-success' : 'bg-danger'}`}>{idx + 1}</span> 
+                {q.questionText}
+              </h5>
+              {!q.isCorrect && q.id && (
+                <button className="btn btn-light rounded-circle shadow-sm border-0 fs-5 d-flex align-items-center justify-content-center transition-all hover-scale ms-3 d-print-none" style={{ width: '40px', height: '40px', color: '#8a2be2', flexShrink: 0 }} onClick={() => onSaveNote(q.id)} title="Lưu vào Note">
+                  📓
+                </button>
+              )}
+            </div>
             
             <div className="p-3 rounded-3 bg-white border shadow-sm mb-3">
               <span className="text-muted fw-bold d-block mb-1 fs-6">Lựa chọn của bạn:</span> 
@@ -68,6 +75,12 @@ function TestResult({ score, questions, onRestart, onCreateMistakeSet }) {
           </div>
         </div>
       ))}
+      
+      <div className="text-center mt-5 mb-4 d-print-none">
+        <button className="btn btn-outline-secondary px-5 py-3 fw-bold rounded-pill shadow-sm transition-all hover-scale" onClick={onRestart}>
+          ← Đóng kết quả
+        </button>
+      </div>
     </div>
   );
 }

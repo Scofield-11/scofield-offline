@@ -19,7 +19,26 @@ def get_global_stats(db: Session = Depends(get_db)):
 # API Lấy danh sách tất cả học phần kèm từ vựng bên trong (Có phân trang)
 @router.get("/sets", response_model=list[schemas.SetOut])
 def get_all_sets(skip: int = 0, limit: int = 1000, db: Session = Depends(get_db)):
-    return crud.get_all_sets(db, skip=skip, limit=limit)
+    sets_data = crud.get_all_sets(db, skip=skip, limit=limit)
+    return [{"id": s.id, "title": s.title, "folder_path": s.folder_path, "created_at": s.created_at, "vocab_count": s.vocab_count} for s in sets_data]
+
+@router.get("/sets/{set_id}", response_model=schemas.SetOut)
+def get_set_detail(set_id: int, db: Session = Depends(get_db)):
+    db_set = crud.get_set_detail(db, set_id)
+    if not db_set:
+        raise HTTPException(status_code=404, detail="Không tìm thấy học phần")
+    return db_set
+
+@router.get("/search", response_model=list[schemas.VocabularyOut])
+def search_vocabulary(q: str, db: Session = Depends(get_db)):
+    if not q.strip():
+        return []
+    search_query = f"%{q.strip()}%"
+    results = db.query(models.Vocabulary).filter(
+        (models.Vocabulary.word.ilike(search_query)) | 
+        (models.Vocabulary.meaning.ilike(search_query))
+    ).limit(10).all()
+    return results
 
 # API Lấy tất cả từ vựng (Có phân trang)
 @router.get("/vocabularies", response_model=list[schemas.VocabularyOut])
@@ -64,18 +83,12 @@ async def import_csv_file(title: str = Form(...), folder_path: str = Form(""), f
     
     for row in reader:
         if len(row) >= 2:
-            if len(row) >= 3:
-                word = row[0].strip()
-                furigana = row[1].strip()
-                meaning = row[2].strip()
-            else:
-                word = row[0].strip()
-                furigana = ""
-                meaning = row[1].strip()
+            word = row[0].strip()
+            meaning = row[1].strip()
                 
             # Bỏ qua header nếu có
             if word and meaning and word.lower() != "word":
-                raw_lines.append(f"{word} | {furigana} | {meaning}")
+                raw_lines.append(f"{word} | {meaning}")
                 
     if not raw_lines:
         raise HTTPException(status_code=400, detail="Không tìm thấy dữ liệu hợp lệ trong file CSV")
@@ -94,7 +107,6 @@ async def import_csv_file(title: str = Form(...), folder_path: str = Form(""), f
 def create_single_vocabulary(payload: schemas.VocabularyCreate, db: Session = Depends(get_db)):
     new_vocab = models.Vocabulary(
         word=payload.word.strip(),
-        furigana=payload.furigana.strip() if payload.furigana else None,
         meaning=payload.meaning.strip(),
         set_id=payload.set_id
     )
@@ -161,7 +173,6 @@ def update_vocabulary(vocab_id: int, payload: schemas.VocabularyUpdate, db: Sess
         raise HTTPException(status_code=404, detail="Không tìm thấy từ vựng")
     
     db_vocab.word = payload.word.strip()
-    db_vocab.furigana = payload.furigana.strip() if payload.furigana else None
     db_vocab.meaning = payload.meaning.strip()
     db.commit()
     db.refresh(db_vocab)
@@ -177,3 +188,48 @@ def delete_vocabulary(vocab_id: int, db: Session = Depends(get_db)):
     db.delete(db_vocab)
     db.commit()
     return {"message": "Đã xóa từ vựng"}
+
+@router.post("/test-history")
+def save_test_history(payload: schemas.TestHistoryCreate, db: Session = Depends(get_db)):
+    history = models.TestHistory(
+        set_id=payload.set_id,
+        title=payload.title,
+        score=payload.score,
+        total=payload.total,
+        wrong_details=payload.wrong_details
+    )
+    db.add(history)
+    db.commit()
+    
+    # Giữ lại tối đa 100 lần test gần nhất để không ảnh hưởng thuật toán tính Chuỗi (Streak)
+    count = db.query(models.TestHistory).count()
+    if count > 100:
+        oldest_records = db.query(models.TestHistory).order_by(models.TestHistory.created_at.asc()).limit(count - 100).all()
+        for record in oldest_records:
+            db.delete(record)
+        db.commit()
+        
+    return {"message": "Đã lưu lịch sử test"}
+
+@router.get("/test-history")
+def get_test_history(skip: int = 0, limit: int = 10, db: Session = Depends(get_db)):
+    histories = db.query(models.TestHistory).order_by(models.TestHistory.created_at.desc()).offset(skip).limit(limit).all()
+    result = []
+    for h in histories:
+        result.append({
+            "id": h.id,
+            "setId": h.set_id,
+            "title": h.title,
+            "score": h.score,
+            "total": h.total,
+            "date": h.created_at.strftime("%d/%m/%Y"), # Lấy ngày để UI gộp nhóm
+            "full_date": h.created_at.strftime("%H:%M - %d/%m/%Y"),
+            "wrongDetails": h.wrong_details
+        })
+    return result
+
+@router.delete("/test-history/all")
+def clear_test_history(db: Session = Depends(get_db)):
+    db.query(models.TestHistory).delete()
+    db.commit()
+    return {"message": "Đã xóa toàn bộ lịch sử test"}

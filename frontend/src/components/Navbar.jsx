@@ -8,6 +8,7 @@ function Navbar() {
 
   const navItems = [
     { path: "/", label: "Thư viện", icon: "📚" },
+    { path: "/kanji", label: "Kanji", icon: "⛩️" }, 
     { path: "/flashcards", label: "Flashcards", icon: "🗂️" },
     { path: "/learn", label: "Học", icon: "🧠" },
     { path: "/test", label: "Kiểm tra", icon: "📝" },
@@ -31,23 +32,13 @@ function Navbar() {
             <Link key={item.path} to={item.path} className={`nav-link-custom ${isActive ? 'active' : ''}`}>
               <span className="nav-icon">{item.icon}</span>
               <span className="d-none d-lg-block fw-bold nav-text">{item.label}</span>
-              <span className="d-lg-none mobile-label">{item.label.split(' ')[0]}</span>
+              <span className="d-lg-none mobile-label">{item.label}</span>
             </Link>
           );
         })}
       </div>
 
-      {/* Thanh tiến độ tổng */}
-      <div className="mt-auto d-none d-lg-block w-100 pb-3 progress-wrapper">
-        <div className="d-flex justify-content-between text-white-50 small mb-2 fw-bold px-1 nav-text w-100">
-          <span>Tiến độ học</span>
-          <span>{studyProgress || 0}%</span>
-        </div>
-        <div className="progress rounded-pill shadow-sm" style={{ height: '8px', backgroundColor: 'rgba(255,255,255,0.15)' }}>
-          <div className="progress-bar bg-warning rounded-pill" role="progressbar" style={{ width: `${studyProgress}%` }}></div>
-        </div>
-      </div>
-    </nav>
+      </nav>
   );
 }
 

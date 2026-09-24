@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import vocabulary, exam
+from routers import vocabulary, exam, kanji
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
@@ -32,6 +32,7 @@ app.add_middleware(
 # Đăng ký các Routers
 app.include_router(vocabulary.router)
 app.include_router(exam.router)
+app.include_router(kanji.router)
 
 @app.get("/")
 def health_check():

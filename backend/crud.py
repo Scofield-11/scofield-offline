@@ -110,15 +110,10 @@ def create_set_with_vocabularies(db: Session, title: str, raw_text: str, folder_
         if '|' in line_clean:
             parts = [p.strip() for p in line_clean.split('|')]
             word = parts[0]
-            if len(parts) >= 3:
-                furigana = parts[1] if parts[1] else None
-                meaning = parts[2]
-            else:
-                furigana = None
-                meaning = parts[1]
+            meaning = parts[1] if len(parts) >= 2 else ""
             
             if word and meaning:
-                new_vocab = models.Vocabulary(word=word, furigana=furigana, meaning=meaning, set_id=new_set.id)
+                new_vocab = models.Vocabulary(word=word, meaning=meaning, set_id=new_set.id)
                 db.add(new_vocab)
                 imported_count += 1
             else:
@@ -135,7 +130,17 @@ def create_set_with_vocabularies(db: Session, title: str, raw_text: str, folder_
 
 # Cập nhật các hàm lấy dữ liệu
 def get_all_sets(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Set).options(joinedload(models.Set.vocabularies)).offset(skip).limit(limit).all()
+    return db.query(
+        models.Set.id,
+        models.Set.title,
+        models.Set.folder_path,
+        models.Set.created_at,
+        func.count(models.Vocabulary.id).label("vocab_count")
+    ).outerjoin(models.Vocabulary, models.Set.id == models.Vocabulary.set_id)\
+     .group_by(models.Set.id).offset(skip).limit(limit).all()
+
+def get_set_detail(db: Session, set_id: int):
+    return db.query(models.Set).options(joinedload(models.Set.vocabularies)).filter(models.Set.id == set_id).first()
 
 def get_all_vocabularies(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.Vocabulary).offset(skip).limit(limit).all()

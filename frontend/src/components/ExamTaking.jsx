@@ -178,7 +178,7 @@ function ExamTaking({ examData, isInstantFeedback, backToList, fetchHistory, ope
                 </div>
               )}
 
-              <div className="d-flex flex-wrap gap-2 justify-content-center" style={{ maxHeight: '65vh', overflowY: 'auto', paddingRight: '5px' }}>
+              <div className="d-flex flex-wrap gap-2 justify-content-center" style={{ maxHeight: '55dvh', overflowY: 'auto', paddingRight: '5px', paddingBottom: '20px' }}>
                 {examData.questions.map((q, idx) => {
                   const userAns = answers[q.id];
                   const isAnswered = userAns !== undefined;

@@ -21,7 +21,7 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
       if (selectedSetId === 'new') {
         if (!noteSetName.trim()) { toast.warning("Nhập tên học phần Note!"); setIsSaving(false); return; }
         // Tạo học phần mới và nạp luôn từ vựng này vào
-        const rawText = `${vocab.word} | ${vocab.furigana || ''} | ${vocab.meaning}`;
+        const rawText = `${vocab.word} | ${vocab.meaning}`;
         await api.post("/vocabularies/bulk-import", {
           title: noteSetName.trim(),
           raw_text: rawText,
@@ -32,7 +32,6 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
         // Lưu vào học phần Note đã có
         await api.post('/vocabularies', {
           word: vocab.word,
-          furigana: vocab.furigana,
           meaning: vocab.meaning,
           set_id: selectedSetId
         });
@@ -55,7 +54,6 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
         <h5 className="fw-bold mb-3" style={{ color: '#8a2be2' }}>📓 Lưu vào Note</h5>
         <div className="bg-light p-3 rounded-3 mb-4 text-center shadow-sm">
           <div className="fw-bold fs-5 text-dark">{vocab.word}</div>
-          {vocab.furigana && <div className="text-muted small fw-bold">{vocab.furigana}</div>}
           <div className="text-primary mt-1 fw-bold">{vocab.meaning}</div>
         </div>
         
@@ -63,7 +61,7 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
           <div className="mb-3">
             <label className="form-label fw-bold text-muted small">Chọn học phần Note:</label>
             <select className="form-select bg-light border-0 fw-bold shadow-sm" value={selectedSetId} onChange={e => setSelectedSetId(e.target.value)}>
-              {noteSets.map(s => <option key={s.id} value={s.id}>{s.title} ({s.vocabularies.length} từ)</option>)}
+              {noteSets.map(s => <option key={s.id} value={s.id}>{s.title} ({s.vocab_count || 0} từ)</option>)}
               <option value="new">+ Tạo học phần Note mới</option>
             </select>
           </div>

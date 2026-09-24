@@ -1,29 +1,18 @@
 from logging.config import fileConfig
-
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
-
 from alembic import context
+import os
+import ssl
+from dotenv import load_dotenv
+import models 
+from database import Base 
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-import os
-from dotenv import load_dotenv
-import models # Import file models của bạn
-from database import Base # Import Base từ file database của bạn
-
-# Load biến môi trường
 load_dotenv()
 
 DB_USER = os.getenv("DB_USER")
@@ -31,35 +20,25 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT")
 DB_NAME = os.getenv("DB_NAME")
-DB_SSL_CA = os.getenv("DB_SSL_CA")
 
-# Tạo chuỗi kết nối
 SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-
-# Ghi đè URL trong config
 config.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
 
-# Chỉ định metadata để Alembic biết cần so sánh với models nào
 target_metadata = Base.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
-
+def get_connect_args():
+    connect_args = {}
+    if DB_HOST and DB_HOST not in ["localhost", "127.0.0.1"]:
+        # env.py nằm trong thư mục alembic/ nên phải lùi ra 1 cấp để trỏ tới ca.pem ở gốc
+        CA_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ca.pem")
+        connect_args["ssl"] = {
+            "ca": CA_FILE_PATH,
+            "cert_reqs": ssl.CERT_NONE,
+            "check_hostname": False
+        }
+    return connect_args
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -71,25 +50,12 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
-
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
-    connect_args = {}
-    if DB_SSL_CA:
-        connect_args["ssl"] = {"ca": DB_SSL_CA}
-    else:
-        connect_args["ssl"] = {"ssl_disabled": False}
-
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-        connect_args=connect_args
+        connect_args=get_connect_args()
     )
 
     with connectable.connect() as connection:
@@ -99,7 +65,6 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
-
 
 if context.is_offline_mode():
     run_migrations_offline()

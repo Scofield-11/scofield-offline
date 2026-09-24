@@ -115,18 +115,18 @@ function AddVocabularyForm({ onAddSuccess, existingFolders = [], currentPath = "
 
           {importMode === 'text' ? (
             <div className="mb-4 fade-in-slide">
-              <label className="text-muted small fw-bold mb-2">DANH SÁCH TỪ VỰNG (Từ vựng | Phiên âm | Ý nghĩa)</label>
+              <label className="text-muted small fw-bold mb-2">DANH SÁCH TỪ VỰNG (Từ vựng | Ý nghĩa)</label>
               <textarea 
-                className="form-control bg-light border-0 p-3" 
-                rows="6" 
-                placeholder="守ります | まもります | Bảo vệ, tuân thủ&#10;外します | はずします | Rời, không có ở&#10;Cái bàn | | Desk (Không có phiên âm cũng được)"
-                value={bulkText} onChange={(e) => setBulkText(e.target.value)}
-                style={{ resize: 'none', borderRadius: '12px', lineHeight: '1.6' }}
+                  className="form-control bg-light border-0 p-3" 
+                  rows="6" 
+                  placeholder="守ります | Bảo vệ, tuân thủ&#10;外します | Rời, không có ở&#10;Cái bàn | Desk"
+                  value={bulkText} onChange={(e) => setBulkText(e.target.value)}
+                  style={{ resize: 'none', borderRadius: '12px', lineHeight: '1.6' }}
               ></textarea>
             </div>
           ) : (
             <div className="mb-4 fade-in-slide">
-              <label className="text-muted small fw-bold mb-2">CHỌN FILE CSV (Cột 1: Từ vựng, Cột 2: Phiên âm, Cột 3: Ý nghĩa)</label>
+              <label className="text-muted small fw-bold mb-2">CHỌN FILE CSV (Cột 1: Từ vựng, Cột 2: Ý nghĩa)</label>
               <div 
                 className={`d-flex flex-column align-items-center justify-content-center p-5 rounded-4 transition-all ${isDragging ? 'bg-primary text-white border-primary' : 'bg-light text-muted'}`}
                 style={{ border: `2px dashed ${isDragging ? 'var(--bs-primary)' : '#ccc'}`, cursor: 'pointer', minHeight: '200px' }}

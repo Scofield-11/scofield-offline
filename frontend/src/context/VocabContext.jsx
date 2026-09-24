@@ -6,6 +6,8 @@ export const VocabContext = createContext();
 export const VocabProvider = ({ children }) => {
   const [sets, setSets] = useState([]);
   const [allVocabs, setAllVocabs] = useState([]);
+  const [kanjiSets, setKanjiSets] = useState([]);
+  const [globalStats, setGlobalStats] = useState({ total: 0 });
   const [loading, setLoading] = useState(false);
   
   const [page, setPage] = useState(0);
@@ -15,6 +17,7 @@ export const VocabProvider = ({ children }) => {
 
   const [hasFetchedSets, setHasFetchedSets] = useState(false);
   const [hasFetchedVocabs, setHasFetchedVocabs] = useState(false);
+  const [hasFetchedKanjiSets, setHasFetchedKanjiSets] = useState(false);
 
   const fetchSets = useCallback(async (isLoadMore = false, forceRefresh = false) => {
     if (hasFetchedSets && !isLoadMore && !forceRefresh) return;
@@ -38,6 +41,15 @@ export const VocabProvider = ({ children }) => {
     }
   }, [hasFetchedSets, page]);
 
+  const fetchGlobalStats = useCallback(async () => {
+    try {
+      const res = await api.get('/stats/global');
+      setGlobalStats(res.data);
+    } catch (error) {
+      console.error("Lỗi khi tải thống kê:", error);
+    }
+  }, []);
+
   const fetchAllVocabs = useCallback(async (forceRefresh = false) => {
     if (hasFetchedVocabs && !forceRefresh) return;
     setLoading(true);
@@ -53,8 +65,22 @@ export const VocabProvider = ({ children }) => {
     }
   }, [hasFetchedVocabs]);
 
+  const fetchKanjiSets = useCallback(async (forceRefresh = false) => {
+    if (hasFetchedKanjiSets && !forceRefresh) return;
+    setLoading(true);
+    try {
+      const res = await api.get('/kanji-sets');
+      setKanjiSets(res.data);
+      setHasFetchedKanjiSets(true);
+    } catch (error) {
+      console.error("Lỗi khi tải danh sách Kanji:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [hasFetchedKanjiSets]);
+
   return (
-    <VocabContext.Provider value={{ sets, allVocabs, loading, fetchSets, fetchAllVocabs, hasMore, studyProgress, setStudyProgress }}>
+    <VocabContext.Provider value={{ sets, setSets, allVocabs, kanjiSets, setKanjiSets, globalStats, fetchGlobalStats, loading, fetchSets, fetchAllVocabs, fetchKanjiSets, hasMore, studyProgress, setStudyProgress }}>
       {children}
     </VocabContext.Provider>
   );

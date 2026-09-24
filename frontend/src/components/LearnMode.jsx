@@ -5,18 +5,22 @@ import LoadingSkeleton from './LoadingSkeleton';
 import confetti from 'canvas-confetti';
 import api from '../api/axiosConfig';
 import { playSound } from '../utils/audio'; // Import âm thanh
+import SetSelector from './SetSelector';
+import ContentTypeSelector from './ContentTypeSelector';
 
-const CHUNK_SIZE = 4;
+const CHUNK_SIZE = 7;
 
 function LearnMode() {
-  const { sets, allVocabs, loading, fetchSets, fetchAllVocabs } = useContext(VocabContext);
+  const { sets, setSets, allVocabs, kanjiSets, setKanjiSets, loading, fetchSets, fetchAllVocabs, fetchKanjiSets } = useContext(VocabContext);
+  const [contentType, setContentType] = useState('vocab');
   const [selectedSetId, setSelectedSetId] = useState('all');
 
-  useEffect(() => { fetchSets(); fetchAllVocabs(); }, [fetchSets, fetchAllVocabs]);
+  useEffect(() => { fetchSets(); fetchAllVocabs(); fetchKanjiSets(); }, [fetchSets, fetchAllVocabs, fetchKanjiSets]);
 
   const [isStarted, setIsStarted] = useState(false);
-  const [pairType, setPairType] = useState('word_meaning');
   const [isReversed, setIsReversed] = useState(false); 
+  const [kanjiFront, setKanjiFront] = useState('kanji');
+  const [kanjiBack, setKanjiBack] = useState('meaning');
   
   const [rounds, setRounds] = useState([]);
   const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
@@ -30,95 +34,157 @@ function LearnMode() {
   
   const [isShaking, setIsShaking] = useState(false);
   const [onlyDue, setOnlyDue] = useState(false); 
-  const [onlyStarred, setOnlyStarred] = useState(false); 
 
   const [streak, setStreak] = useState(0);
   const [maxStreak, setMaxStreak] = useState(0); 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef(null);
+  const srsAnsweredRefs = useRef(new Set());
 
   const vibrate = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) containerRef.current?.requestFullscreen().catch(() => toast.error("Không hỗ trợ Fullscreen"));
-    else document.exitFullscreen();
+    if (!isFullscreen) {
+      const elem = containerRef.current;
+      if (elem?.requestFullscreen) {
+        elem.requestFullscreen().catch(() => setIsFullscreen(true));
+      } else if (elem?.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+        setIsFullscreen(true);
+      } else {
+        setIsFullscreen(true);
+      }
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => setIsFullscreen(false));
+      } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+        setIsFullscreen(false);
+      } else {
+        setIsFullscreen(false);
+      }
+    }
   };
 
   const handleExit = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    setIsFullscreen(false);
     setIsStarted(false);
   };
 
   useEffect(() => {
-    const handleFs = () => setIsFullscreen(!!document.fullscreenElement);
+    const handleFs = () => setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
     document.addEventListener("fullscreenchange", handleFs);
-    return () => document.removeEventListener("fullscreenchange", handleFs);
+    document.addEventListener("webkitfullscreenchange", handleFs);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFs);
+      document.removeEventListener("webkitfullscreenchange", handleFs);
+    };
   }, []);
 
-  const getSideLabel = (type, side) => {
-    if (type === 'word_meaning') return side === 'front' ? 'Từ vựng (Gốc)' : 'Ý nghĩa';
-    if (type === 'word_furigana') return side === 'front' ? 'Từ vựng (Gốc)' : 'Phiên âm';
-    if (type === 'furigana_meaning') return side === 'front' ? 'Phiên âm' : 'Ý nghĩa';
+  const getFrontLabel = () => {
+    if (contentType === 'kanji') {
+      const map = { kanji: 'Hán tự', hanviet: 'Hán Việt', hiragana: 'Phiên âm', meaning: 'Ý nghĩa' };
+      return map[kanjiFront];
+    }
+    return isReversed ? 'Ý nghĩa' : 'Từ vựng';
   };
 
-  const getFrontLabel = () => isReversed ? getSideLabel(pairType, 'back') : getSideLabel(pairType, 'front');
-  const getBackLabel = () => isReversed ? getSideLabel(pairType, 'front') : getSideLabel(pairType, 'back');
+  const getBackLabel = () => {
+    if (contentType === 'kanji') {
+      const map = { kanji: 'Hán tự', hanviet: 'Hán Việt', hiragana: 'Phiên âm', meaning: 'Ý nghĩa' };
+      return map[kanjiBack];
+    }
+    return isReversed ? 'Từ vựng' : 'Ý nghĩa';
+  };
 
   const getQuestionText = (vocab) => {
     if (!vocab) return "";
-    if (pairType === 'word_meaning') return isReversed ? vocab.meaning : vocab.word;
-    if (pairType === 'word_furigana') return isReversed ? (vocab.furigana || vocab.word) : vocab.word;
-    if (pairType === 'furigana_meaning') return isReversed ? vocab.meaning : (vocab.furigana || vocab.word);
+    return contentType === 'kanji' ? vocab[kanjiFront] : (isReversed ? vocab.meaning : vocab.word);
   };
 
   const getAnswerText = (vocab) => {
     if (!vocab) return "";
-    if (pairType === 'word_meaning') return isReversed ? vocab.word : vocab.meaning;
-    if (pairType === 'word_furigana') return isReversed ? vocab.word : (vocab.furigana || vocab.word);
-    if (pairType === 'furigana_meaning') return isReversed ? (vocab.furigana || vocab.word) : vocab.meaning;
+    return contentType === 'kanji' ? vocab[kanjiBack] : (isReversed ? vocab.word : vocab.meaning);
+  };
+
+  const handleSwap = () => {
+    if (contentType === 'kanji') {
+      setKanjiFront(kanjiBack);
+      setKanjiBack(kanjiFront);
+    } else {
+      setIsReversed(!isReversed);
+    }
   };
 
   const updateSRS = async (vocabId, isCorrect) => {
+    if (contentType === 'kanji') return; // Kanji chưa có SRS
+    if (srsAnsweredRefs.current.has(vocabId)) return;
+    srsAnsweredRefs.current.add(vocabId);
     try { await api.put(`/vocabularies/${vocabId}/srs`, { is_correct: isCorrect }); } 
     catch (err) { console.error("Lỗi cập nhật SRS:", err); }
   };
 
   const playAudio = (text, type = 'normal') => {
     if (!text) return;
-    const isVietnamese = text.split(" ").length > 0 && !/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text) && !/[a-zA-Z]/.test(text[0]);
-    if (isVietnamese) return; 
+    const hasJapanese = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text);
+    if (!hasJapanese) return;
 
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text) ? 'ja-JP' : 'en-US';
+      utterance.lang = 'ja-JP';
       utterance.rate = type === 'error' ? 0.8 : 0.9;
       window.speechSynthesis.speak(utterance);
     }
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     let pool = [];
+
     if (selectedSetId === 'all') {
-      const validSets = sets.filter(s => !s.title.startsWith('_Thư mục:'));
-      pool = validSets.flatMap(s => s.vocabularies);
+      if (contentType === 'kanji') {
+        const fullKanjiSets = await Promise.all(kanjiSets.map(async (s) => {
+          if (s.kanjis) return s;
+          const res = await api.get(`/kanji-sets/${s.id}`);
+          return res.data;
+        }));
+        setKanjiSets(fullKanjiSets);
+        pool = fullKanjiSets.flatMap(s => s.kanjis || []);
+      } else {
+        pool = allVocabs;
+      }
     } else {
-      const targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-      if (targetSet) pool = targetSet.vocabularies;
+      if (contentType === 'kanji') {
+        let targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
+        if (targetSet && !targetSet.kanjis) {
+          const res = await api.get(`/kanji-sets/${targetSet.id}`);
+          targetSet = res.data;
+          setKanjiSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
+        }
+        pool = targetSet?.kanjis || [];
+      } else {
+        let targetSet = sets.find(s => s.id === parseInt(selectedSetId));
+        if (targetSet && !targetSet.vocabularies) {
+          const res = await api.get(`/sets/${targetSet.id}`);
+          targetSet = res.data;
+          setSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
+        }
+        pool = targetSet?.vocabularies || [];
+      }
     }
 
     if (onlyDue) {
+      if (contentType === 'kanji') {
+        return toast.warning("Chế độ ôn tập đến hạn (SRS) chưa hỗ trợ cho Kanji!");
+      }
       const now = new Date();
       pool = pool.filter(v => v.next_review && new Date(v.next_review) <= now);
       if (pool.length === 0) return toast.success("Tuyệt vời! Không có từ vựng nào đến hạn.");
     }
 
-    if (onlyStarred) {
-      pool = pool.filter(v => v.is_starred);
-      if (pool.length === 0) return toast.warning("Chưa có từ vựng được gắn sao!");
-    }
-
-    if (pool.length === 0) return toast.warning("Học phần này chưa có từ vựng phù hợp!");
+    if (pool.length === 0) return toast.warning("Học phần này chưa có dữ liệu phù hợp!");
 
     const shuffled = [...pool].sort(() => 0.5 - Math.random());
     const chunked = [];
@@ -129,64 +195,130 @@ function LearnMode() {
     setCurrentWordIndex(0);
     setMode('choice');
     setCurrentRoundWords([...chunked[0]]);
-    generateOptions(chunked[0][0], allVocabs);
+    
+    const allData = contentType === 'kanji' ? kanjiSets.flatMap(s => s.kanjis || []) : allVocabs;
+    generateOptions(chunked[0][0], allData);
     setStreak(0);
     setMaxStreak(0);
+    srsAnsweredRefs.current.clear();
     setIsStarted(true);
     setIsFinished(false);
+    if (!isFullscreen) toggleFullscreen();
   };
 
   const generateOptions = (currentWord, allData) => {
     if (!currentWord) return;
+    const currentText = contentType === 'kanji' ? currentWord[kanjiBack] : currentWord.word;
+
     const scoredAnswers = allData.filter(v => v.id !== currentWord.id).map(v => {
       let score = 0;
-      currentWord.word.split('').forEach(c => { if (v.word.includes(c)) score += 1; });
+      const vText = contentType === 'kanji' ? v[kanjiBack] : v.word;
+      if (currentText && vText) {
+        currentText.split('').forEach(c => { if (vText.includes(c)) score += 1; });
+      }
       return { ...v, score: score + Math.random() * 0.5 };
     });
     scoredAnswers.sort((a, b) => b.score - a.score);
-    const choices = [...scoredAnswers.slice(0, 3), currentWord].sort(() => 0.5 - Math.random());
+
+    const normalizeStr = (text) => text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(',').map(s => s.trim()).filter(Boolean).sort().join(',');
+    const correctAnswerStr = getAnswerText(currentWord);
+    const normalizedCorrect = normalizeStr(correctAnswerStr);
+    const usedAnswers = new Set([normalizedCorrect]);
+    
+    let wrongOptions = [];
+    for (let i = 0; i < scoredAnswers.length; i++) {
+      const rawAns = getAnswerText(scoredAnswers[i]);
+      const normAns = normalizeStr(rawAns);
+      if (!usedAnswers.has(normAns) && normAns !== "") {
+        wrongOptions.push(scoredAnswers[i]);
+        usedAnswers.add(normAns);
+      }
+      if (wrongOptions.length === 3) break;
+    }
+    
+    if (wrongOptions.length < 3) {
+       const backupVocabs = [...allData].sort(() => 0.5 - Math.random());
+       for (let i = 0; i < backupVocabs.length; i++) {
+          if (backupVocabs[i].id === currentWord.id) continue;
+          const rawAns = getAnswerText(backupVocabs[i]);
+          const normAns = normalizeStr(rawAns);
+          if (!usedAnswers.has(normAns) && normAns !== "") {
+            wrongOptions.push(backupVocabs[i]);
+            usedAnswers.add(normAns);
+          }
+          if (wrongOptions.length === 3) break;
+       }
+    }
+
+    const choices = [...wrongOptions, currentWord].sort(() => 0.5 - Math.random());
     setOptions(choices);
   };
 
   const handleNextAfterFeedback = () => {
     setFeedback(null);
     setInputText('');
+    const allData = contentType === 'kanji' ? kanjiSets.flatMap(s => s.kanjis || []) : allVocabs;
 
     if (currentWordIndex < currentRoundWords.length - 1) {
       const nextWord = currentRoundWords[currentWordIndex + 1];
       setCurrentWordIndex(currentWordIndex + 1);
-      if (mode === 'choice') generateOptions(nextWord, allVocabs);
+      if (mode === 'choice') generateOptions(nextWord, allData);
     } else {
-      if (mode === 'choice') {
-        setMode('typing');
-        setCurrentWordIndex(0);
-        setCurrentRoundWords([...rounds[currentRoundIndex]]);
-      } else {
+      const goToNextRound = () => {
         if (currentRoundIndex < rounds.length - 1) {
           const nextRoundIdx = currentRoundIndex + 1;
           setCurrentRoundIndex(nextRoundIdx);
           setCurrentWordIndex(0);
           setMode('choice');
           setCurrentRoundWords([...rounds[nextRoundIdx]]);
-          generateOptions(rounds[nextRoundIdx][0], allVocabs);
+          generateOptions(rounds[nextRoundIdx][0], allData);
         } else {
           setIsFinished(true);
-          playSound('win'); // Tiếng hoàn thành
+          playSound('win');
           confetti({ particleCount: 200, spread: 100, origin: { y: 0.5 } });
           vibrate([100, 50, 100, 50, 200]); 
         }
+      };
+
+      if (mode === 'choice') {
+        const typingWords = rounds[currentRoundIndex];
+        if (typingWords.length > 0) {
+          setMode('typing');
+          setCurrentWordIndex(0);
+          setCurrentRoundWords([...typingWords]);
+        } else {
+          // Nếu tất cả từ đều bị sai ở phần trắc nghiệm -> bỏ qua vòng tự luận, đi thẳng sang Round mới
+          goToNextRound();
+        }
+      } else {
+        goToNextRound();
       }
     }
   };
 
   const handleWrongAnswer = (currentWord, correctAnswerText, userAnsText) => {
-    playSound('wrong'); // Tiếng buzzer sai
+    playSound('wrong'); 
     vibrate([200, 100, 200]); 
     setStreak(0);
     updateSRS(currentWord.id, false);
     setIsShaking(true);
     setTimeout(() => setIsShaking(false), 400);
-    setCurrentRoundWords(prev => [...prev, currentWord]); 
+    
+    // Cơ chế Quizlet: Đẩy câu sai sang Round kế tiếp
+    setRounds(prev => {
+      const newRounds = [...prev];
+      // Xóa từ này khỏi round hiện tại để vòng tự luận (typing) phía sau không hỏi lại
+      newRounds[currentRoundIndex] = newRounds[currentRoundIndex].filter(w => w.id !== currentWord.id);
+      
+      // Đẩy vào round kế tiếp (hoặc tạo round mới nếu đang ở round cuối cùng)
+      if (currentRoundIndex < newRounds.length - 1) {
+        newRounds[currentRoundIndex + 1] = [...newRounds[currentRoundIndex + 1], currentWord];
+      } else {
+        newRounds.push([currentWord]);
+      }
+      return newRounds;
+    });
+    
     setFeedback({ isCorrect: false, correctAnswer: correctAnswerText, yourAnswer: userAnsText });
     playAudio(correctAnswerText, 'error');
   };
@@ -215,6 +347,7 @@ function LearnMode() {
   const checkFuzzyMatch = (input, correctStr) => {
     if(!correctStr) return false;
     const clean = (str) => str.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g,"").replace(/\s{2,}/g," ").trim().toLowerCase();
+    if (clean(input) === clean(correctStr)) return true;
     return correctStr.split(',').map(s => clean(s)).includes(clean(input));
   };
 
@@ -251,74 +384,19 @@ function LearnMode() {
   if (loading) return <LoadingSkeleton />;
 
   if (!isStarted) {
-    const validSets = sets.filter(s => !s.title.startsWith('_Thư mục:'));
-    const groupedSets = validSets.reduce((acc, set) => {
-      const folder = set.folder_path || '🏠 Thư mục gốc';
-      if (!acc[folder]) acc[folder] = [];
-      acc[folder].push(set);
-      return acc;
-    }, {});
-
     return (
       <div className="container mt-5 fade-in-slide" style={{ maxWidth: '650px' }}>
         <div className="card shadow-sm border-0 p-4 p-md-5 rounded-4 bg-white" style={{ borderRadius: '24px' }}>
           <h3 className="text-center mb-5 fw-bold text-dark">Cài đặt Chế độ Học</h3>
           
           <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-2">1. Chọn học phần muốn học:</label>
-            <select className="form-select form-select-lg bg-light border-0 fw-bold text-dark shadow-sm" style={{ borderRadius: '12px', height: '56px' }} value={selectedSetId} onChange={(e) => setSelectedSetId(e.target.value)}>
-              <option value="all">-- Tất cả từ vựng --</option>
-              {Object.entries(groupedSets).map(([folder, folderSets]) => (
-                <optgroup key={folder} label={folder}>
-                  {folderSets.map(s => <option key={s.id} value={s.id}>{s.title} ({s.vocabularies.length} từ)</option>)}
-                </optgroup>
-              ))}
-            </select>
+            <label className="form-label fw-bold text-muted mb-2">1. Chọn loại nội dung:</label>
+            <ContentTypeSelector contentType={contentType} setContentType={setContentType} />
           </div>
 
           <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-3">2. Nội dung vắt óc:</label>
-            <div className="row g-3">
-              <div className="col-12 col-md-4">
-                <div 
-                  className={`card h-100 border-2 shadow-sm transition-all rounded-4 ${pairType === 'word_meaning' ? 'border-primary bg-primary text-white' : 'border-light bg-white text-dark hover-bg-light'}`}
-                  style={{cursor: 'pointer'}}
-                  onClick={() => { setPairType('word_meaning'); setIsReversed(false); }}
-                >
-                  <div className="card-body p-3 p-md-4 text-center">
-                    <div className="display-6 mb-2">📖</div>
-                    <h6 className="fw-bold mb-1">Dịch nghĩa</h6>
-                    <small className={pairType === 'word_meaning' ? 'text-white-50' : 'text-muted'} style={{fontSize: '0.8rem'}}>Từ vựng ↔ Ý nghĩa</small>
-                  </div>
-                </div>
-              </div>
-              <div className="col-6 col-md-4">
-                <div 
-                  className={`card h-100 border-2 shadow-sm transition-all rounded-4 ${pairType === 'word_furigana' ? 'border-primary bg-primary text-white' : 'border-light bg-white text-dark hover-bg-light'}`}
-                  style={{cursor: 'pointer'}}
-                  onClick={() => { setPairType('word_furigana'); setIsReversed(false); }}
-                >
-                  <div className="card-body p-3 p-md-4 text-center">
-                    <div className="display-6 mb-2">🔤</div>
-                    <h6 className="fw-bold mb-1">Đọc Kanji</h6>
-                    <small className={pairType === 'word_furigana' ? 'text-white-50' : 'text-muted'} style={{fontSize: '0.8rem'}}>Từ vựng ↔ Phiên âm</small>
-                  </div>
-                </div>
-              </div>
-              <div className="col-6 col-md-4">
-                <div 
-                  className={`card h-100 border-2 shadow-sm transition-all rounded-4 ${pairType === 'furigana_meaning' ? 'border-primary bg-primary text-white' : 'border-light bg-white text-dark hover-bg-light'}`}
-                  style={{cursor: 'pointer'}}
-                  onClick={() => { setPairType('furigana_meaning'); setIsReversed(false); }}
-                >
-                  <div className="card-body p-3 p-md-4 text-center">
-                    <div className="display-6 mb-2">🗣️</div>
-                    <h6 className="fw-bold mb-1">Nghe Nói</h6>
-                    <small className={pairType === 'furigana_meaning' ? 'text-white-50' : 'text-muted'} style={{fontSize: '0.8rem'}}>Phiên âm ↔ Ý nghĩa</small>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <label className="form-label fw-bold text-muted mb-2">2. Chọn học phần muốn học:</label>
+            <SetSelector sets={contentType === 'kanji' ? kanjiSets : sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
           </div>
 
           <div className="mb-4 text-start">
@@ -326,16 +404,21 @@ function LearnMode() {
               <input className="form-check-input m-0 shadow-sm" type="checkbox" id="srsToggle" checked={onlyDue} onChange={(e) => setOnlyDue(e.target.checked)} style={{ cursor: 'pointer' }} />
               <label className="form-check-label fw-bold text-dark m-0" htmlFor="srsToggle" style={{ cursor: 'pointer' }}>Chỉ ôn tập từ đến hạn (Cơ chế Spaced Repetition)</label>
             </div>
-            <div className="form-check form-switch fs-6 d-flex align-items-center gap-3 bg-light p-3 rounded-4 border-0 shadow-sm mt-3">
-              <input className="form-check-input m-0 shadow-sm" type="checkbox" id="starredLearnToggle" checked={onlyStarred} onChange={(e) => setOnlyStarred(e.target.checked)} style={{ cursor: 'pointer' }} />
-              <label className="form-check-label fw-bold text-dark m-0" htmlFor="starredLearnToggle" style={{ cursor: 'pointer' }}>Chỉ học từ đã đánh dấu (⭐)</label>
-            </div>
           </div>
 
           <div className="d-flex align-items-center justify-content-between bg-light p-3 rounded-4 border-0 mb-5 shadow-sm transition-all">
             <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
               <span className="text-muted small fw-bold d-block mb-1 text-truncate">HỆ THỐNG HỎI</span>
-              <span className="fw-bold fs-5 text-truncate d-block" style={{ color: '#8a2be2' }}>{getFrontLabel()}</span>
+              {contentType === 'kanji' ? (
+                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1" style={{ color: '#8a2be2', maxWidth: '140px' }} value={kanjiFront} onChange={(e) => setKanjiFront(e.target.value)}>
+                    <option value="kanji" className="text-dark">Hán tự</option>
+                    <option value="hanviet" className="text-dark">Hán Việt</option>
+                    <option value="hiragana" className="text-dark">Phiên âm</option>
+                    <option value="meaning" className="text-dark">Ý nghĩa</option>
+                  </select>
+              ) : (
+                  <span className="fw-bold fs-5 text-truncate d-block mt-2" style={{ color: '#8a2be2' }}>{getFrontLabel()}</span>
+              )}
             </div>
             
             <div className="px-2 px-md-3" style={{ flexShrink: 0 }}>
@@ -343,7 +426,7 @@ function LearnMode() {
                 type="button"
                 className="btn btn-warning rounded-circle shadow-sm fw-bold d-flex align-items-center justify-content-center transition-all hover-scale m-0" 
                 style={{width: '48px', height: '48px', fontSize: '1.2rem'}}
-                onClick={() => setIsReversed(!isReversed)}
+                onClick={handleSwap}
                 title="Đảo chiều câu hỏi"
               >
                 🔄
@@ -352,7 +435,16 @@ function LearnMode() {
             
             <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
               <span className="text-muted small fw-bold d-block mb-1 text-truncate">BẠN TRẢ LỜI</span>
-              <span className="fw-bold text-success fs-5 text-truncate d-block">{getBackLabel()}</span>
+              {contentType === 'kanji' ? (
+                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1 text-success" style={{ maxWidth: '140px' }} value={kanjiBack} onChange={(e) => setKanjiBack(e.target.value)}>
+                    <option value="kanji" className="text-dark">Hán tự</option>
+                    <option value="hanviet" className="text-dark">Hán Việt</option>
+                    <option value="hiragana" className="text-dark">Phiên âm</option>
+                    <option value="meaning" className="text-dark">Ý nghĩa</option>
+                  </select>
+              ) : (
+                  <span className="fw-bold text-success fs-5 text-truncate d-block mt-2">{getBackLabel()}</span>
+              )}
             </div>
           </div>
 
@@ -366,10 +458,12 @@ function LearnMode() {
 
   const currentWord = currentRoundWords[currentWordIndex];
   const questionText = getQuestionText(currentWord);
-  const progressPercent = Math.round(((currentRoundIndex + (currentWordIndex/currentRoundWords.length)) / rounds.length) * 100);
+  const modeOffset = mode === 'choice' ? 0 : 0.5;
+  const wordProgress = currentRoundWords.length > 0 ? (currentWordIndex / currentRoundWords.length) * 0.5 : 0;
+  const progressPercent = Math.round(((currentRoundIndex + modeOffset + wordProgress) / rounds.length) * 100) || 0;
 
   return (
-    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light d-flex flex-column justify-content-center' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflow: 'hidden' } : {}}>
+    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : {}}>
       <div className="mx-auto" style={{ maxWidth: '650px', width: '100%' }}>
         
         {!isFinished && (

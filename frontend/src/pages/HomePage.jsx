@@ -6,7 +6,6 @@ function HomePage() {
   return (
     <>
       <Dashboard />
-      <hr className="my-5 opacity-25" style={{ maxWidth: '850px', margin: '0 auto' }} />
       <VocabularyList />
     </>
   );

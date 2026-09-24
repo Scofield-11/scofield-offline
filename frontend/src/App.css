@@ -7,6 +7,17 @@ body {
   padding: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation; /* Khóa tính năng double-tap zoom */
+  /* Đã bỏ overscroll-behavior-y để khôi phục tính năng chạm đỉnh màn hình (Tap-to-top) của iOS */
+}
+
+/* --- NATIVE APP FEEL (Tối ưu cảm giác chạm) --- */
+a, button, .card, .flashcard-container, .nav-link-custom, .list-group-item {
+  -webkit-tap-highlight-color: transparent !important; /* Tắt viền xám khi chạm trên iOS/Android */
+}
+.btn, .nav-link-custom, .flashcard-container, .match-card {
+  user-select: none; /* Không cho bôi đen text khi bấm nhanh/giữ lâu */
+  -webkit-user-select: none;
 }
 
 
@@ -137,6 +148,7 @@ body {
 }
 
 /* Bottom Nav Mobile (Giữ nguyên) */
+/* Bottom Nav Mobile (Giữ nguyên) */
 @media (max-width: 991px) {
   .main-content {
     margin-left: 0;
@@ -180,18 +192,19 @@ body {
 @media (max-width: 991px) {
   .main-content {
     margin-left: 0;
-    padding-bottom: calc(var(--bottom-nav-height) + 20px);
+    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom) + 20px);
   }
   
   .app-navigation {
     width: 100%;
-    height: var(--bottom-nav-height);
+    height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
     top: auto;
     bottom: 0;
     flex-direction: row;
     justify-content: space-around;
     align-items: center;
     padding: 0 10px;
+    padding-bottom: env(safe-area-inset-bottom);
     border-radius: 24px 24px 0 0;
     box-shadow: 0 -4px 25px rgba(0,0,0,0.15);
     background-color: rgba(134, 59, 255, 0.98);
@@ -237,6 +250,12 @@ body {
 .btn-outline-primary { color: #863bff !important; border-color: #863bff !important; }
 .btn-outline-primary:hover { background-color: #863bff !important; color: #ffffff !important; }
 
+/* --- MODAL NATIVE SCROLL --- */
+.modal {
+  overscroll-behavior: contain; /* Ngăn cuộn xuyên xuống nền (scroll chaining) */
+  -webkit-overflow-scrolling: touch;
+}
+
 /* --- ANIMATIONS --- */
 .fade-in { animation: fadeIn 0.3s ease-in-out forwards; }
 .fade-in-slide { animation: fadeInSlide 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
@@ -258,6 +277,8 @@ body {
   position: relative; width: 100%; height: 100%;
   transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
   transform-style: preserve-3d; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1); border-radius: 24px;
+  will-change: transform; /* Ép render bằng GPU giúp lật mượt 60fps */
+  transform: translateZ(0); /* Kích hoạt hardware acceleration trên iOS cũ */
 }
 .flashcard-inner.flipped { transform: rotateY(180deg); }
 .flashcard-front, .flashcard-back {
@@ -372,4 +393,41 @@ body {
 @keyframes shimmerLoading {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* --- PSEUDO-FULLSCREEN CHO MOBILE --- */
+/* --- TỐI ƯU HIỂN THỊ MOBILE --- */
+@media (max-width: 768px) {
+  /* Chống iOS tự động Zoom khi bấm vào ô nhập liệu */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+  
+  /* Ẩn thanh cuộn ngang trên giao diện Mobile nhưng vẫn cho phép vuốt */
+  .table-responsive::-webkit-scrollbar,
+  .overflow-auto::-webkit-scrollbar {
+    display: none;
+  }
+  .table-responsive, .overflow-auto {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* --- PSEUDO-FULLSCREEN CHO MOBILE --- */
+.mobile-fullscreen {
+  position: absolute !important; /* Đổi thành absolute để trình duyệt dùng thanh cuộn gốc, khôi phục vuốt mượt và chạm đỉnh màn hình */
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  min-height: 100dvh !important;
+  height: auto !important; /* Để container tự phình ra theo nội dung bài test */
+  z-index: 10000 !important; 
+  background-color: #f6f7fb !important;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 80px) !important; /* Trừ hao không bị lấp câu cuối */
+}
+
+/* Bật gia tốc cuộn mượt (momentum scrolling) cho các vùng cuộn cục bộ trên iOS Safari */
+.overflow-auto, .table-responsive, [style*="overflow-y: auto"], [style*="overflowY: auto"] {
+  -webkit-overflow-scrolling: touch !important;
 }

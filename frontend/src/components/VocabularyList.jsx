@@ -9,7 +9,7 @@ import EmptyState from './EmptyState';
 import { motion } from 'framer-motion';
 
 function VocabularyList() {
-  const { sets, loading, fetchSets, hasMore } = useContext(VocabContext);
+  const { sets, setSets, loading, fetchSets, hasMore } = useContext(VocabContext);
   
   const [expandedSetId, setExpandedSetId] = useState(null);
   const [viewMode, setViewMode] = useState('list'); 
@@ -30,8 +30,15 @@ function VocabularyList() {
   useEffect(() => { fetchSets(); }, [fetchSets]);
   useEffect(() => { localStorage.setItem('scofieldSortOption', sortOption); }, [sortOption]);
   
-  const [searchTerm, setSearchTerm] = useState('');
   const [noteModalVocab, setNoteModalVocab] = useState(null);
+  const [testHistories, setTestHistories] = useState([]);
+
+  // Gọi API lấy lịch sử test để tính toán % tiến độ khi component render
+  useEffect(() => {
+    api.get('/test-history?skip=0&limit=50')
+      .then(res => setTestHistories(res.data))
+      .catch(console.error);
+  }, []);
 
   // --- CẤU HÌNH HIỆU ỨNG MOTION ---
   const containerVariants = {
@@ -52,13 +59,17 @@ function VocabularyList() {
     return <span>{parts.map((part, i) => part.toLowerCase() === highlight.toLowerCase() ? <mark key={i} className="bg-warning px-1 rounded">{part}</mark> : part)}</span>;
   };
 
-  const calculateProgress = (vocabularies) => {
-    if (!vocabularies || vocabularies.length === 0) return 0;
-    const learned = vocabularies.filter(v => v.repetition > 0).length;
-    return Math.round((learned / vocabularies.length) * 100);
+  const calculateProgress = (setId, vocabCount) => {
+    if (!vocabCount || vocabCount === 0) return 0;
+    
+    // Tìm các bài test tương ứng với set_id này và có tổng số câu hỏi khớp với số từ vựng hiện tại
+    const validTests = testHistories.filter(h => h.setId === setId && h.total === vocabCount);
+    if (validTests.length === 0) return 0;
+    
+    const maxScore = Math.max(...validTests.map(h => h.score));
+    return Math.round((maxScore / vocabCount) * 100);
   };
 
-  const isSearching = searchTerm.trim().length > 0;
   let displaySets = [];
   let displayFolders = [];
 
@@ -67,49 +78,39 @@ function VocabularyList() {
     ...customFolders
   ])).sort();
 
-  if (isSearching) {
-    displaySets = sets.map(set => {
-      let filteredVocabs = set.vocabularies.filter(v => 
-        v.word.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        v.meaning.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      return { ...set, vocabularies: filteredVocabs, progress: calculateProgress(set.vocabularies) };
-    }).filter(set => set.title.toLowerCase().includes(searchTerm.toLowerCase()) || set.vocabularies.length > 0);
-  } else {
-    const currentLevelSets = [];
-    const subfolders = new Set();
+  const currentLevelSets = [];
+  const subfolders = new Set();
 
-    const checkPathForFolders = (path) => {
-      if (!path) return;
-      if (path === currentPath) {
-      } else if (path.startsWith(currentPath ? currentPath + '/' : '')) {
-        const remainingPath = currentPath ? path.substring(currentPath.length + 1) : path;
-        const nextFolder = remainingPath.split('/')[0];
-        if (nextFolder) subfolders.add(nextFolder);
-      }
-    };
+  const checkPathForFolders = (path) => {
+    if (!path) return;
+    if (path === currentPath) {
+    } else if (path.startsWith(currentPath ? currentPath + '/' : '')) {
+      const remainingPath = currentPath ? path.substring(currentPath.length + 1) : path;
+      const nextFolder = remainingPath.split('/')[0];
+      if (nextFolder) subfolders.add(nextFolder);
+    }
+  };
 
-    sets.forEach(set => {
-      const path = (set.folder_path || "").trim();
-      if (path === currentPath) currentLevelSets.push(set); 
-      checkPathForFolders(path);
+  sets.forEach(set => {
+    const path = (set.folder_path || "").trim();
+    if (path === currentPath) currentLevelSets.push(set); 
+    checkPathForFolders(path);
+  });
+
+  customFolders.forEach(path => checkPathForFolders(path));
+  displayFolders = Array.from(subfolders);
+  
+  displaySets = currentLevelSets
+    .filter(set => !set.title.startsWith('_Thư mục:')) 
+    .map(set => {
+      let filteredVocabs = set.vocabularies ? [...set.vocabularies] : [];
+      if (sortOption === 'az') filteredVocabs.sort((a, b) => a.word.localeCompare(b.word));
+      else if (sortOption === 'za') filteredVocabs.sort((a, b) => b.word.localeCompare(a.word));
+      else if (sortOption === 'oldest') filteredVocabs.sort((a, b) => a.id - b.id);
+      else filteredVocabs.sort((a, b) => b.id - a.id);
+
+      return { ...set, vocabularies: filteredVocabs, progress: calculateProgress(set.id, set.vocab_count || filteredVocabs.length) };
     });
-
-    customFolders.forEach(path => checkPathForFolders(path));
-    displayFolders = Array.from(subfolders);
-    
-    displaySets = currentLevelSets
-      .filter(set => !set.title.startsWith('_Thư mục:')) 
-      .map(set => {
-        let filteredVocabs = [...set.vocabularies];
-        if (sortOption === 'az') filteredVocabs.sort((a, b) => a.word.localeCompare(b.word));
-        else if (sortOption === 'za') filteredVocabs.sort((a, b) => b.word.localeCompare(a.word));
-        else if (sortOption === 'oldest') filteredVocabs.sort((a, b) => a.id - b.id);
-        else filteredVocabs.sort((a, b) => b.id - a.id);
-
-        return { ...set, vocabularies: filteredVocabs, progress: calculateProgress(set.vocabularies) };
-      });
-  }
 
   displaySets.sort((a, b) => {
     if (sortOption === 'custom') {
@@ -132,16 +133,30 @@ function VocabularyList() {
 
   const [editingVocabId, setEditingVocabId] = useState(null);
   const [editWord, setEditWord] = useState('');
-  const [editFurigana, setEditFurigana] = useState('');
   const [editMeaning, setEditMeaning] = useState('');
   const [addingToSetId, setAddingToSetId] = useState(null);
   const [newWord, setNewWord] = useState('');
-  const [newFurigana, setNewFurigana] = useState('');
   const [newMeaning, setNewMeaning] = useState('');
 
-  const toggleSet = (setId) => {
+  const toggleSet = async (setId) => {
     if (viewMode === 'grid') setViewMode('list'); 
-    setExpandedSetId(expandedSetId === setId ? null : setId);
+    if (expandedSetId === setId) {
+      setExpandedSetId(null);
+      setAddingToSetId(null);
+      return;
+    }
+    
+    const targetSet = sets.find(s => s.id === setId);
+    if (targetSet && !targetSet.vocabularies) {
+      try {
+        const res = await api.get(`/sets/${setId}`);
+        setSets(prev => prev.map(s => s.id === setId ? { ...s, vocabularies: res.data.vocabularies } : s));
+      } catch (error) {
+        toast.error("Lỗi tải chi tiết học phần!");
+      }
+    }
+    
+    setExpandedSetId(setId);
     setAddingToSetId(null);
   };
 
@@ -200,25 +215,24 @@ function VocabularyList() {
     setAddingToSetId(null);
     setEditingVocabId(vocab.id);
     setEditWord(vocab.word);
-    setEditFurigana(vocab.furigana || '');
     setEditMeaning(vocab.meaning);
   };
 
   const handleSaveEdit = async (vocabId) => {
     try {
-      await api.put(`/vocabularies/${vocabId}`, { word: editWord, furigana: editFurigana || null, meaning: editMeaning });
+      await api.put(`/vocabularies/${vocabId}`, { word: editWord, meaning: editMeaning });
       setEditingVocabId(null); toast.success("Cập nhật thành công!"); fetchSets(false, true);
     } catch (error) { toast.error("Lỗi cập nhật"); }
   };
 
   const handleAddClick = (setId) => {
-    setEditingVocabId(null); setAddingToSetId(setId); setNewWord(''); setNewFurigana(''); setNewMeaning('');
+    setEditingVocabId(null); setAddingToSetId(setId); setNewWord(''); setNewMeaning('');
   };
 
   const handleSaveNew = async (setId) => {
     if (!newWord.trim() || !newMeaning.trim()) return toast.warning("Nhập đủ thông tin!");
     try {
-      await api.post('/vocabularies', { word: newWord.trim(), furigana: newFurigana.trim() || null, meaning: newMeaning.trim(), set_id: setId });
+      await api.post('/vocabularies', { word: newWord.trim(), meaning: newMeaning.trim(), set_id: setId });
       toast.success("Đã thêm từ vựng mới!"); setAddingToSetId(null); fetchSets(false, true);
     } catch (error) { toast.error("Lỗi thêm từ vựng!"); }
   };
@@ -272,16 +286,60 @@ function VocabularyList() {
 
   const handleDragEnd = () => { setDraggedSetId(null); setDragOverSetId(null); };
 
+  const handleDownloadSet = async (e, set, format) => {
+    e.stopPropagation();
+    
+    // Kiểm tra xem đã tải chi tiết từ vựng chưa, nếu chưa thì gọi API lấy
+    let vocabsToExport = set.vocabularies;
+    if (!vocabsToExport) {
+      try {
+        const res = await api.get(`/sets/${set.id}`);
+        vocabsToExport = res.data.vocabularies;
+      } catch (error) {
+        toast.error("Lỗi tải dữ liệu để xuất file!");
+        return;
+      }
+    }
+
+    if (!vocabsToExport || vocabsToExport.length === 0) {
+      toast.warning("Học phần này chưa có từ vựng!");
+      return;
+    }
+
+    let content = "";
+    // Đặt tên file loại bỏ các ký tự đặc biệt không hợp lệ
+    let filename = `${set.title.replace(/[/\\?%*:|"<>]/g, '-')}.${format}`;
+
+    if (format === 'txt') {
+      content = vocabsToExport.map(v => `${v.word} | ${v.meaning}`).join('\n');
+    } else if (format === 'csv') {
+      // Dùng \uFEFF (BOM) để Excel nhận diện đúng tiếng Việt UTF-8
+      content = '\uFEFF' + "Từ vựng,Ý nghĩa\n" + vocabsToExport.map(v => `"${v.word.replace(/"/g, '""')}","${v.meaning.replace(/"/g, '""')}"`).join('\n');
+    }
+
+    const blob = new Blob([content], { type: format === 'csv' ? 'text/csv;charset=utf-8;' : 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) return <LoadingSkeleton />;
 
   return (
     <div className="container-fluid mt-4 mx-auto" style={{ maxWidth: '1000px' }}>
       
-      <AddVocabularyForm 
-        onAddSuccess={() => fetchSets(false, true)} 
-        existingFolders={allExistingFolders} 
-        currentPath={currentPath} 
-      />
+      <div id="add-vocab-section">
+        <AddVocabularyForm 
+          onAddSuccess={() => fetchSets(false, true)} 
+          existingFolders={allExistingFolders} 
+          currentPath={currentPath} 
+        />
+      </div>
 
       {noteModalVocab && (
         <SaveNoteModal 
@@ -292,19 +350,10 @@ function VocabularyList() {
         />
       )}
 
-      {/* THANH TÌM KIẾM & LỌC */}
-      <div className="d-flex flex-column flex-lg-row gap-3 mb-4 fade-in-slide align-items-lg-center">
-        <div className="position-relative flex-grow-1">
-          <span className="position-absolute top-50 translate-middle-y ms-4 fs-5 text-muted">🔍</span>
-          <input 
-            type="text" 
-            className="form-control form-control-lg bg-white border-0 shadow-sm rounded-pill fw-bold text-primary w-100" 
-            placeholder="Tìm kiếm từ vựng, ý nghĩa..." 
-            value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ paddingLeft: '3.5rem', height: '54px' }}
-          />
-        </div>
-        <div className="d-flex flex-wrap flex-md-nowrap gap-3 justify-content-between">
+      {/* TÊU ĐỀ & LỌC */}
+      <div className="d-flex flex-column flex-lg-row gap-3 mb-4 fade-in-slide align-items-lg-center justify-content-between">
+        <h3 className="fw-bold m-0 text-primary">Thư viện của bạn</h3>
+        <div className="d-flex flex-wrap flex-md-nowrap gap-3 justify-content-end">
           <select 
             className="form-select form-select-lg bg-white border-0 shadow-sm rounded-pill fw-bold text-muted custom-select-fix"
             value={sortOption} onChange={(e) => setSortOption(e.target.value)}
@@ -336,7 +385,7 @@ function VocabularyList() {
       </div>
 
       {/* THANH ĐIỀU HƯỚNG THƯ MỤC */}
-      {!isSearching && (
+      {true && (
         <div className="d-flex justify-content-between align-items-center mb-4 bg-white px-4 py-3 rounded-pill shadow-sm fade-in-slide">
           <div className="d-flex align-items-center flex-wrap gap-2">
             <button className={`btn btn-sm rounded-pill fw-bold ${currentPath === "" ? 'btn-primary shadow-sm' : 'btn-light'}`} onClick={() => setCurrentPath("")}>
@@ -363,7 +412,7 @@ function VocabularyList() {
       )}
 
       {/* DANH SÁCH THƯ MỤC CON */}
-      {!isSearching && displayFolders.length > 0 && (
+      {displayFolders.length > 0 && (
         <div className="row g-3 mb-5 fade-in">
           {displayFolders.map(folderName => (
             <div key={folderName} className="col-6 col-md-4 col-lg-3">
@@ -440,9 +489,9 @@ function VocabularyList() {
                     <h5 className="mb-2 fw-bold text-dark text-truncate" title={vocabSet.title}>
                       {vocabSet.title}
                     </h5>
-                    <span className="badge bg-light text-muted border px-2 py-1">{vocabSet.vocabularies.length} thuật ngữ</span>
+                    <span className="badge bg-light text-muted border px-2 py-1">{vocabSet.vocab_count} thuật ngữ</span>
                     
-                    <div className={`mt-3 ${viewMode === 'list' ? 'd-none' : 'w-100'}`}>
+                    <div className="mt-3 w-100">
                       <div className="d-flex justify-content-between text-muted fw-bold mb-2" style={{ fontSize: '0.8rem' }}>
                         <span>Tiến độ</span>
                         <span>{vocabSet.progress}%</span>
@@ -455,6 +504,8 @@ function VocabularyList() {
 
                   <div className={`d-flex align-items-center gap-2 ${viewMode === 'grid' ? 'w-100 justify-content-between mt-2' : ''}`}>
                     <div className="d-flex gap-2">
+                      <button className="btn btn-sm btn-light text-primary fw-bold border-0 px-2 py-2" onClick={(e) => handleDownloadSet(e, vocabSet, 'txt')} title="Tải file Text">⬇️ TXT</button>
+                      <button className="btn btn-sm btn-light text-success fw-bold border-0 px-2 py-2" onClick={(e) => handleDownloadSet(e, vocabSet, 'csv')} title="Tải file Excel">⬇️ Excel</button>
                       <button className="btn btn-sm btn-light text-danger fw-bold border-0 px-3 py-2" onClick={(e) => handleDeleteSet(e, vocabSet.id, vocabSet.title)}>🗑️ Xóa</button>
                     </div>
                     {viewMode === 'list' && (
@@ -469,21 +520,18 @@ function VocabularyList() {
                   <div className="card-body p-0 border-top bg-light rounded-bottom-4 fade-in-slide" style={{ cursor: 'default' }}>
                     <div className="list-group list-group-flush rounded-bottom-4">
                       
-                      {vocabSet.vocabularies.length === 0 && addingToSetId !== vocabSet.id && (
+                      {vocabSet.vocabularies?.length === 0 && addingToSetId !== vocabSet.id && (
                         <div className="text-center py-4 text-muted fst-italic border-bottom border-light">Học phần trống. Hãy thêm thẻ đầu tiên!</div>
                       )}
 
-                      {vocabSet.vocabularies.map((vocab) => (
+                      {vocabSet.vocabularies?.map((vocab) => (
                         <div key={vocab.id} className="list-group-item bg-white p-4 border-bottom border-light">
                           {editingVocabId === vocab.id ? (
                             <div className="row g-2 align-items-center">
-                              <div className="col-sm-4">
+                              <div className="col-sm-5">
                                 <input type="text" className="form-control bg-light border-0" value={editWord} onChange={(e) => setEditWord(e.target.value)} autoFocus placeholder="Thuật ngữ" />
                               </div>
-                              <div className="col-sm-3">
-                                <input type="text" className="form-control bg-light border-0" value={editFurigana} onChange={(e) => setEditFurigana(e.target.value)} placeholder="Phiên âm" />
-                              </div>
-                              <div className="col-sm-3">
+                              <div className="col-sm-5">
                                 <input type="text" className="form-control bg-light border-0" value={editMeaning} onChange={(e) => setEditMeaning(e.target.value)} placeholder="Định nghĩa" />
                               </div>
                               <div className="col-sm-2 text-end">
@@ -501,12 +549,11 @@ function VocabularyList() {
                                   title="Lưu vào Note"
                                 >📓</button>
                                 <div className="ms-1 text-truncate">
-                                  {vocab.furigana && <div className="text-muted fw-bold mb-1" style={{ fontSize: '0.9rem' }}>{vocab.furigana}</div>}
-                                  <div className="fw-bold fs-5 text-dark">{highlightText(vocab.word, searchTerm)}</div>
+                                  <div className="fw-bold fs-5 text-dark">{vocab.word}</div>
                                 </div>
                               </div>
                               <div className="col-sm-5 text-dark ps-4 text-truncate fs-5">
-                                {highlightText(vocab.meaning, searchTerm)}
+                                {vocab.meaning}
                               </div>
                               <div className="col-sm-2 text-end">
                                 <button className="btn btn-sm btn-light text-primary fw-bold px-3 py-2 me-2" onClick={() => handleEditClick(vocab)}>✏️ Sửa</button>
@@ -520,13 +567,10 @@ function VocabularyList() {
                       {addingToSetId === vocabSet.id ? (
                         <div className="list-group-item bg-white p-4 border-top border-primary border-2">
                           <div className="row g-2 align-items-center">
-                            <div className="col-sm-4">
+                            <div className="col-sm-5">
                               <input type="text" className="form-control bg-light border-0" value={newWord} onChange={(e) => setNewWord(e.target.value)} autoFocus placeholder="Từ vựng mới" />
                             </div>
-                            <div className="col-sm-3">
-                              <input type="text" className="form-control bg-light border-0" value={newFurigana} onChange={(e) => setNewFurigana(e.target.value)} placeholder="Phiên âm (Tùy chọn)" />
-                            </div>
-                            <div className="col-sm-3">
+                            <div className="col-sm-5">
                               <input type="text" className="form-control bg-light border-0" value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="Định nghĩa" />
                             </div>
                             <div className="col-sm-2 text-end">
@@ -556,7 +600,7 @@ function VocabularyList() {
         </motion.div>
       )}
 
-      {hasMore && sets.length > 0 && !searchTerm && (
+      {hasMore && sets.length > 0 && (
         <div className="text-center mt-5 mb-5">
           <button className="btn btn-outline-primary px-5 py-3 fs-5 fw-bold rounded-pill shadow-sm" onClick={() => fetchSets(true)}>
             Tải thêm học phần cũ ↓
