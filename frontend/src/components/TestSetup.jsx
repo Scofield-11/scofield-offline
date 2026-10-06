@@ -1,26 +1,40 @@
 import React from 'react';
 import SetSelector from './SetSelector';
 import ContentTypeSelector from './ContentTypeSelector';
+import GameModeSelector from './GameModeSelector';
 
-function TestSetup({ sets, kanjiSets, contentType, setContentType, selectedSetId, setSelectedSetId, questionCount, setQuestionCount, poolSize, questionFormat, setQuestionFormat, isReversed, setIsReversed, kanjiFront, setKanjiFront, kanjiBack, setKanjiBack, generateTest }) {
-  const getFrontLabel = () => {
-    if (contentType === 'kanji') {
-      const map = { kanji: 'Hán tự', hanviet: 'Hán Việt', hiragana: 'Phiên âm', meaning: 'Ý nghĩa' };
-      return map[kanjiFront];
+function TestSetup({ sets, currentContentType, selectedSetId, setSelectedSetId, questionCount, setQuestionCount, poolSize, questionFormat, setQuestionFormat, isReversed, setIsReversed, kanjiFront, setKanjiFront, kanjiBack, setKanjiBack, generateTest }) {
+  
+  let hasFourFields = false;
+  if (currentContentType === 'kanji') {
+    hasFourFields = true;
+  } else {
+    if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') {
+      hasFourFields = true;
+    } else if (!String(selectedSetId).startsWith('lang_en') && !String(selectedSetId).startsWith('lang_kanji') && !String(selectedSetId).startsWith('all_')) {
+      if (String(selectedSetId).startsWith('folder_')) {
+         const folderName = String(selectedSetId).substring(7);
+         const targetSets = sets.filter(s => (s.folder_path || '🏠 Thư mục gốc') === folderName);
+         hasFourFields = targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
+      } else {
+        const s = sets.find(set => set.id == selectedSetId);
+        if (s && s.vocabularies) {
+          hasFourFields = s.vocabularies.some(v => v.hanviet || v.hiragana);
+        }
+      }
     }
+  }
+
+  const getFrontLabel = () => {
     return isReversed ? 'Ý nghĩa' : 'Từ vựng';
   };
   
   const getBackLabel = () => {
-    if (contentType === 'kanji') {
-      const map = { kanji: 'Hán tự', hanviet: 'Hán Việt', hiragana: 'Phiên âm', meaning: 'Ý nghĩa' };
-      return map[kanjiBack];
-    }
     return isReversed ? 'Từ vựng' : 'Ý nghĩa';
   };
 
   const handleSwap = () => {
-    if (contentType === 'kanji') {
+    if (hasFourFields) {
       setKanjiFront(kanjiBack);
       setKanjiBack(kanjiFront);
     } else {
@@ -34,13 +48,8 @@ function TestSetup({ sets, kanjiSets, contentType, setContentType, selectedSetId
         <h3 className="text-center mb-5 fw-bold text-dark">Thiết lập Bài Thi</h3>
         
         <div className="mb-4">
-          <label className="form-label fw-bold text-muted mb-2">1. Chọn loại nội dung:</label>
-          <ContentTypeSelector contentType={contentType} setContentType={setContentType} />
-        </div>
-
-        <div className="mb-4">
-          <label className="form-label fw-bold text-muted mb-2">2. Chọn học phần:</label>
-          <SetSelector sets={contentType === 'kanji' ? kanjiSets : sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
+          <label className="form-label fw-bold text-muted mb-2">1. Chọn học phần:</label>
+          <SetSelector sets={sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
         </div>
 
         <div className="row g-3 mb-4">
@@ -72,48 +81,61 @@ function TestSetup({ sets, kanjiSets, contentType, setContentType, selectedSetId
           </div>
         </div>
 
-        
-
-        <div className="d-flex align-items-center justify-content-between bg-light p-3 rounded-4 border-0 mb-5 shadow-sm transition-all">
-            <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
-              <span className="text-muted small fw-bold d-block mb-1 text-truncate">HỆ THỐNG HỎI</span>
-              {contentType === 'kanji' ? (
-                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1" style={{ color: '#8a2be2', maxWidth: '140px' }} value={kanjiFront} onChange={(e) => setKanjiFront(e.target.value)}>
-                    <option value="kanji" className="text-dark">Hán tự</option>
-                    <option value="hanviet" className="text-dark">Hán Việt</option>
-                    <option value="hiragana" className="text-dark">Phiên âm</option>
-                    <option value="meaning" className="text-dark">Ý nghĩa</option>
-                  </select>
-              ) : (
-                  <span className="fw-bold fs-5 text-truncate d-block mt-2" style={{ color: '#8a2be2' }}>{getFrontLabel()}</span>
-              )}
-            </div>
-            
-            <div className="px-2 px-md-3" style={{ flexShrink: 0 }}>
-              <button 
-                type="button"
-                className="btn btn-warning rounded-circle shadow-sm fw-bold d-flex align-items-center justify-content-center transition-all hover-scale m-0" 
-                style={{width: '48px', height: '48px', fontSize: '1.2rem'}}
-                onClick={handleSwap}
-                title="Đảo chiều câu hỏi"
-              >
-                🔄
-              </button>
-            </div>
-            
-            <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
-              <span className="text-muted small fw-bold d-block mb-1 text-truncate">BẠN TRẢ LỜI</span>
-              {contentType === 'kanji' ? (
-                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1 text-success" style={{ maxWidth: '140px' }} value={kanjiBack} onChange={(e) => setKanjiBack(e.target.value)}>
-                    <option value="kanji" className="text-dark">Hán tự</option>
-                    <option value="hanviet" className="text-dark">Hán Việt</option>
-                    <option value="hiragana" className="text-dark">Phiên âm</option>
-                    <option value="meaning" className="text-dark">Ý nghĩa</option>
-                  </select>
-              ) : (
-                  <span className="fw-bold text-success fs-5 text-truncate d-block mt-2">{getBackLabel()}</span>
-              )}
-            </div>
+        <div className="mb-5">
+            <GameModeSelector
+              hasFourFields={hasFourFields}
+              currentContentType={currentContentType}
+              isReversed={isReversed}
+              setIsReversed={setIsReversed}
+              kanjiFront={kanjiFront}
+              setKanjiFront={setKanjiFront}
+              kanjiBack={kanjiBack}
+              setKanjiBack={setKanjiBack}
+              onSwap={handleSwap}
+              sectionLabel="Gói đề thi (Exam Presets)"
+              presets={[
+                {
+                  id: 'jlpt-meaning', icon: '🧠', iconBg: '#ede9fe', label: 'Dạng bài JLPT (Ý nghĩa)',
+                  getDesc: (f, b, type) => {
+                    const fLabel = f === 'meaning' ? 'Ý nghĩa' : 'Từ/Hán tự';
+                    const bLabel = b === 'meaning' ? 'Ý nghĩa' : 'Từ/Hán tự';
+                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
+                  },
+                  frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'meaning',
+                  isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'meaning') || (f === 'meaning' && b === w); }
+                },
+                {
+                  id: 'jlpt-reading', icon: '🗣️', iconBg: '#fef3c7', label: 'Dạng bài JLPT (Cách đọc)',
+                  getDesc: (f, b) => {
+                    const fLabel = f === 'hiragana' ? 'Phiên âm' : 'Từ/Hán tự';
+                    const bLabel = b === 'hiragana' ? 'Phiên âm' : 'Từ/Hán tự';
+                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
+                  },
+                  frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'hiragana',
+                  isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'hiragana') || (f === 'hiragana' && b === w); }
+                },
+                {
+                  id: 'hanviet', icon: '👑', iconBg: '#fee2e2', label: 'Vua Hán Tự',
+                  getDesc: (f, b) => {
+                    const fLabel = f === 'meaning' ? 'Ý nghĩa' : 'Hán Việt';
+                    const bLabel = b === 'meaning' ? 'Ý nghĩa' : 'Hán Việt';
+                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
+                  },
+                  frontKey: () => 'hanviet', backKey: () => 'meaning',
+                  isActive: (f, b) => (f === 'hanviet' && b === 'meaning') || (f === 'meaning' && b === 'hanviet')
+                },
+                {
+                  id: 'listening', icon: '🎧', iconBg: '#dbeafe', label: 'Nghe Hiểu / Từ vựng',
+                  getDesc: (f, b) => {
+                    const fLabel = f === 'meaning' ? 'Ý nghĩa' : 'Phiên âm';
+                    const bLabel = b === 'meaning' ? 'Ý nghĩa' : 'Phiên âm';
+                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
+                  },
+                  frontKey: () => 'hiragana', backKey: () => 'meaning',
+                  isActive: (f, b) => (f === 'hiragana' && b === 'meaning') || (f === 'meaning' && b === 'hiragana')
+                }
+              ]}
+            />
           </div>
 
         <button className="btn btn-primary btn-lg w-100 fw-bold shadow-lg" style={{ borderRadius: '14px', padding: '15px', backgroundColor: '#8a2be2', border: 'none' }} onClick={generateTest}>

@@ -133,9 +133,13 @@ function VocabularyList() {
 
   const [editingVocabId, setEditingVocabId] = useState(null);
   const [editWord, setEditWord] = useState('');
+  const [editHanviet, setEditHanviet] = useState('');
+  const [editHiragana, setEditHiragana] = useState('');
   const [editMeaning, setEditMeaning] = useState('');
   const [addingToSetId, setAddingToSetId] = useState(null);
   const [newWord, setNewWord] = useState('');
+  const [newHanviet, setNewHanviet] = useState('');
+  const [newHiragana, setNewHiragana] = useState('');
   const [newMeaning, setNewMeaning] = useState('');
 
   const toggleSet = async (setId) => {
@@ -147,7 +151,8 @@ function VocabularyList() {
     }
     
     const targetSet = sets.find(s => s.id === setId);
-    if (targetSet && !targetSet.vocabularies) {
+    // Thay đổi ĐIỀU KIỆN LOAD: Nếu có từ vựng (count > 0) mà mảng bị rỗng (do API cha không trả về) -> Gọi API lấy chi tiết
+    if (targetSet && targetSet.vocabularies && targetSet.vocabularies.length === 0 && targetSet.vocab_count > 0) {
       try {
         const res = await api.get(`/sets/${setId}`);
         setSets(prev => prev.map(s => s.id === setId ? { ...s, vocabularies: res.data.vocabularies } : s));
@@ -204,9 +209,17 @@ function VocabularyList() {
     }
   };
 
-  const handleDeleteVocab = async (vocabId) => {
+  // Helper: Cập nhật lại danh sách từ của 1 học phần đang mở mà không đóng nó
+  const refreshSet = async (setId) => {
+    try {
+      const res = await api.get(`/sets/${setId}`);
+      setSets(prev => prev.map(s => s.id === setId ? { ...s, vocabularies: res.data.vocabularies, vocab_count: res.data.vocabularies?.length || s.vocab_count } : s));
+    } catch (error) { console.error("Lỗi refresh set", error); }
+  };
+
+  const handleDeleteVocab = async (vocabId, setId) => {
     if (window.confirm("Xóa từ này?")) {
-      try { await api.delete(`/vocabularies/${vocabId}`); toast.success("Đã xóa từ vựng!"); fetchSets(false, true); } 
+      try { await api.delete(`/vocabularies/${vocabId}`); toast.success("Đã xóa từ vựng!"); refreshSet(setId); } 
       catch (error) { toast.error("Lỗi xóa từ vựng"); }
     }
   };
@@ -215,25 +228,27 @@ function VocabularyList() {
     setAddingToSetId(null);
     setEditingVocabId(vocab.id);
     setEditWord(vocab.word);
+    setEditHanviet(vocab.hanviet || '');
+    setEditHiragana(vocab.hiragana || '');
     setEditMeaning(vocab.meaning);
   };
 
-  const handleSaveEdit = async (vocabId) => {
+  const handleSaveEdit = async (vocabId, setId) => {
     try {
-      await api.put(`/vocabularies/${vocabId}`, { word: editWord, meaning: editMeaning });
-      setEditingVocabId(null); toast.success("Cập nhật thành công!"); fetchSets(false, true);
+      await api.put(`/vocabularies/${vocabId}`, { word: editWord, hanviet: editHanviet, hiragana: editHiragana, meaning: editMeaning });
+      setEditingVocabId(null); toast.success("Cập nhật thành công!"); refreshSet(setId);
     } catch (error) { toast.error("Lỗi cập nhật"); }
   };
 
   const handleAddClick = (setId) => {
-    setEditingVocabId(null); setAddingToSetId(setId); setNewWord(''); setNewMeaning('');
+    setEditingVocabId(null); setAddingToSetId(setId); setNewWord(''); setNewHanviet(''); setNewHiragana(''); setNewMeaning('');
   };
 
   const handleSaveNew = async (setId) => {
     if (!newWord.trim() || !newMeaning.trim()) return toast.warning("Nhập đủ thông tin!");
     try {
-      await api.post('/vocabularies', { word: newWord.trim(), meaning: newMeaning.trim(), set_id: setId });
-      toast.success("Đã thêm từ vựng mới!"); setAddingToSetId(null); fetchSets(false, true);
+      await api.post('/vocabularies', { word: newWord.trim(), hanviet: newHanviet.trim(), hiragana: newHiragana.trim(), meaning: newMeaning.trim(), set_id: setId });
+      toast.success("Đã thêm từ vựng mới!"); setAddingToSetId(null); refreshSet(setId);
     } catch (error) { toast.error("Lỗi thêm từ vựng!"); }
   };
 
@@ -306,15 +321,26 @@ function VocabularyList() {
       return;
     }
 
+    // Kiểm tra xem có từ nào chứa hanviet hoặc hiragana không
+    const hasFourCols = vocabsToExport.some(v => (v.hanviet && v.hanviet.trim() !== "") || (v.hiragana && v.hiragana.trim() !== ""));
+
     let content = "";
     // Đặt tên file loại bỏ các ký tự đặc biệt không hợp lệ
     let filename = `${set.title.replace(/[/\\?%*:|"<>]/g, '-')}.${format}`;
 
     if (format === 'txt') {
-      content = vocabsToExport.map(v => `${v.word} | ${v.meaning}`).join('\n');
+      if (hasFourCols) {
+        content = vocabsToExport.map(v => `${v.word} | ${v.hanviet || ''} | ${v.hiragana || ''} | ${v.meaning}`).join('\n');
+      } else {
+        content = vocabsToExport.map(v => `${v.word} | ${v.meaning}`).join('\n');
+      }
     } else if (format === 'csv') {
-      // Dùng \uFEFF (BOM) để Excel nhận diện đúng tiếng Việt UTF-8
-      content = '\uFEFF' + "Từ vựng,Ý nghĩa\n" + vocabsToExport.map(v => `"${v.word.replace(/"/g, '""')}","${v.meaning.replace(/"/g, '""')}"`).join('\n');
+      if (hasFourCols) {
+        content = '\uFEFF' + "Chữ Hán/Từ vựng,Hán Việt,Cách đọc,Ý nghĩa\n" + vocabsToExport.map(v => `"${(v.word || '').replace(/"/g, '""')}","${(v.hanviet || '').replace(/"/g, '""')}","${(v.hiragana || '').replace(/"/g, '""')}","${(v.meaning || '').replace(/"/g, '""')}"`).join('\n');
+      } else {
+        // Dùng \uFEFF (BOM) để Excel nhận diện đúng tiếng Việt UTF-8
+        content = '\uFEFF' + "Từ vựng,Ý nghĩa\n" + vocabsToExport.map(v => `"${v.word.replace(/"/g, '""')}","${v.meaning.replace(/"/g, '""')}"`).join('\n');
+      }
     }
 
     const blob = new Blob([content], { type: format === 'csv' ? 'text/csv;charset=utf-8;' : 'text/plain;charset=utf-8;' });
@@ -413,32 +439,30 @@ function VocabularyList() {
 
       {/* DANH SÁCH THƯ MỤC CON */}
       {displayFolders.length > 0 && (
-        <div className="row g-3 mb-5 fade-in">
+        <div className="row g-4 mb-5 fade-in">
           {displayFolders.map(folderName => (
-            <div key={folderName} className="col-6 col-md-4 col-lg-3">
+            <div key={folderName} className="col-6 col-md-4 col-lg-3 col-xl-2">
               <div 
-                className="card shadow-sm border-0 rounded-4 h-100 bg-white transition-all hover-scale" 
+                className="card border-0 h-100 mac-folder-card" 
                 style={{cursor: 'pointer'}}
                 onClick={() => setCurrentPath(currentPath ? `${currentPath}/${folderName}` : folderName)}
               >
-                <div className="card-body d-flex align-items-center justify-content-between p-3">
-                  <div className="d-flex align-items-center gap-2 overflow-hidden flex-grow-1" style={{ minWidth: 0 }}>
-                    <span className="fs-3">📁</span>
-                    <h6 className="fw-bold mb-0 text-dark text-truncate" title={folderName}>{folderName}</h6>
-                  </div>
+                <div className="card-body d-flex flex-column align-items-center justify-content-center p-3 position-relative pt-4">
                   <button 
-                    className="btn btn-sm btn-light text-danger rounded-circle border-0 d-flex align-items-center justify-content-center shadow-sm ms-2 transition-all hover-bg-danger hover-text-white"
-                    style={{ width: '32px', height: '32px', flexShrink: 0 }}
+                    className="btn btn-sm btn-light text-danger rounded-circle border-0 d-flex align-items-center justify-content-center shadow-sm position-absolute transition-all hover-bg-danger hover-text-white"
+                    style={{ top: '8px', right: '8px', width: '28px', height: '28px', zIndex: 2 }}
                     onClick={(e) => handleDeleteFolder(e, folderName)}
                     title="Xóa thư mục này"
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="3 6 5 6 21 6"></polyline>
                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                       <line x1="10" y1="11" x2="10" y2="17"></line>
                       <line x1="14" y1="11" x2="14" y2="17"></line>
                     </svg>
                   </button>
+                  <div className="mac-folder-icon mb-3">📁</div>
+                  <h6 className="fw-bold mb-0 text-dark text-center text-truncate w-100 px-1" title={folderName}>{folderName}</h6>
                 </div>
               </div>
             </div>
@@ -461,7 +485,7 @@ function VocabularyList() {
             <motion.div 
               variants={itemVariants}
               key={vocabSet.id} 
-              className={viewMode === 'grid' ? 'col-md-6 col-xl-4' : 'mb-4'}
+              className={viewMode === 'grid' ? 'col-md-6 col-xl-4' : 'mb-5'}
               draggable
               onDragStart={(e) => handleDragStart(e, vocabSet.id)}
               onDrag={(e) => handleDrag(e)}
@@ -471,17 +495,19 @@ function VocabularyList() {
               onDragEnd={handleDragEnd}
             >
               <div 
-                className="card border-0 rounded-4 h-100 transition-all bg-white"
+                className={`card border-0 h-100 transition-all ${viewMode === 'grid' ? 'rounded-4 bg-white' : 'smooth-list-item'}`}
                 style={{ 
                   opacity: isDragged ? 0.4 : 1, 
                   transform: isDragged ? 'scale(0.96)' : isDragOver ? 'scale(1.02)' : 'scale(1)',
-                  boxShadow: isDragOver ? '0 12px 24px rgba(134,59,255,0.2)' : '0 4px 12px rgba(0,0,0,0.04)',
+                  boxShadow: viewMode === 'grid' 
+                    ? (isDragOver ? '0 12px 24px rgba(134,59,255,0.2)' : '0 4px 12px rgba(0,0,0,0.04)')
+                    : (isDragOver ? '0 20px 40px rgba(134,59,255,0.15)' : '0 15px 35px rgba(0,0,0,0.03)'),
                   border: isDragOver ? '2px dashed var(--bs-primary)' : '2px solid transparent',
                   zIndex: isDragOver ? 10 : 1
                 }}
               >
                 <div 
-                  className={`card-header bg-transparent p-4 border-0 rounded-4 d-flex ${viewMode === 'grid' ? 'flex-column align-items-start gap-3' : 'justify-content-between align-items-center'}`}
+                  className={`card-header bg-transparent p-4 border-0 d-flex ${viewMode === 'grid' ? 'flex-column align-items-start gap-3 rounded-4' : 'justify-content-between align-items-center'}`}
                   style={{ cursor: isDragged ? 'grabbing' : 'grab' }}
                   onClick={() => toggleSet(vocabSet.id)}
                 >
@@ -489,14 +515,23 @@ function VocabularyList() {
                     <h5 className="mb-2 fw-bold text-dark text-truncate" title={vocabSet.title}>
                       {vocabSet.title}
                     </h5>
-                    <span className="badge bg-light text-muted border px-2 py-1">{vocabSet.vocab_count} thuật ngữ</span>
+                    <span className="badge bg-light text-muted border px-2 py-1 rounded-pill">{vocabSet.vocab_count} thẻ</span>
+                    {vocabSet.type === 'kanji' ? (
+                      <span className="badge ms-2 px-2 py-1 bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 rounded-pill">
+                        ⛩️ KANJI
+                      </span>
+                    ) : (
+                      <span className={`badge ms-2 px-2 py-1 rounded-pill ${vocabSet.language === 'en' ? 'bg-info bg-opacity-10 text-info border border-info border-opacity-25' : 'bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25'}`}>
+                        {vocabSet.language === 'en' ? '🇬🇧 EN' : '🇯🇵 JA'}
+                      </span>
+                    )}
                     
                     <div className="mt-3 w-100">
                       <div className="d-flex justify-content-between text-muted fw-bold mb-2" style={{ fontSize: '0.8rem' }}>
                         <span>Tiến độ</span>
                         <span>{vocabSet.progress}%</span>
                       </div>
-                      <div className="progress rounded-pill bg-light" style={{ height: '6px' }}>
+                      <div className="progress rounded-pill bg-light" style={{ height: '8px' }}>
                         <div className="progress-bar bg-success rounded-pill" style={{ width: `${vocabSet.progress}%` }}></div>
                       </div>
                     </div>
@@ -504,12 +539,12 @@ function VocabularyList() {
 
                   <div className={`d-flex align-items-center gap-2 ${viewMode === 'grid' ? 'w-100 justify-content-between mt-2' : ''}`}>
                     <div className="d-flex gap-2">
-                      <button className="btn btn-sm btn-light text-primary fw-bold border-0 px-2 py-2" onClick={(e) => handleDownloadSet(e, vocabSet, 'txt')} title="Tải file Text">⬇️ TXT</button>
-                      <button className="btn btn-sm btn-light text-success fw-bold border-0 px-2 py-2" onClick={(e) => handleDownloadSet(e, vocabSet, 'csv')} title="Tải file Excel">⬇️ Excel</button>
-                      <button className="btn btn-sm btn-light text-danger fw-bold border-0 px-3 py-2" onClick={(e) => handleDeleteSet(e, vocabSet.id, vocabSet.title)}>🗑️ Xóa</button>
+                      <button className="btn btn-sm btn-light text-primary fw-bold border-0 px-2 py-2 rounded-3" onClick={(e) => handleDownloadSet(e, vocabSet, 'txt')} title="Tải file Text">⬇️ TXT</button>
+                      <button className="btn btn-sm btn-light text-success fw-bold border-0 px-2 py-2 rounded-3" onClick={(e) => handleDownloadSet(e, vocabSet, 'csv')} title="Tải file Excel">⬇️ Excel</button>
+                      <button className="btn btn-sm btn-light text-danger fw-bold border-0 px-3 py-2 rounded-3" onClick={(e) => handleDeleteSet(e, vocabSet.id, vocabSet.title)}>🗑️ Xóa</button>
                     </div>
                     {viewMode === 'list' && (
-                      <span className="text-muted fs-5 ms-3 bg-light rounded-circle d-flex align-items-center justify-content-center" style={{ width:'35px', height:'35px' }}>
+                      <span className="text-muted fs-5 ms-3 bg-light rounded-circle d-flex align-items-center justify-content-center" style={{ width:'40px', height:'40px' }}>
                         {expandedSetId === vocabSet.id ? '▲' : '▼'}
                       </span>
                     )}
@@ -517,34 +552,47 @@ function VocabularyList() {
                 </div>
 
                 {expandedSetId === vocabSet.id && viewMode === 'list' && (
-                  <div className="card-body p-0 border-top bg-light rounded-bottom-4 fade-in-slide" style={{ cursor: 'default' }}>
-                    <div className="list-group list-group-flush rounded-bottom-4">
+                  <div className="card-body p-2 border-0 fade-in-slide" style={{ cursor: 'default' }}>
+                    <div className="list-group list-group-flush">
                       
                       {vocabSet.vocabularies?.length === 0 && addingToSetId !== vocabSet.id && (
-                        <div className="text-center py-4 text-muted fst-italic border-bottom border-light">Học phần trống. Hãy thêm thẻ đầu tiên!</div>
+                        <div className="text-center py-4 text-muted fst-italic smooth-list-item-inner">Học phần trống. Hãy thêm thẻ đầu tiên!</div>
                       )}
 
-                      {vocabSet.vocabularies?.map((vocab) => (
-                        <div key={vocab.id} className="list-group-item bg-white p-4 border-bottom border-light">
+                      {vocabSet.vocabularies?.map((vocab) => {
+                        const hasExtra = (vocab.hanviet && vocab.hanviet.trim()) || (vocab.hiragana && vocab.hiragana.trim());
+                        const isJa = vocabSet.language !== 'en';
+                        return (
+                        <div key={vocab.id} className="list-group-item smooth-list-item-inner p-4 border-0 shadow-sm">
                           {editingVocabId === vocab.id ? (
                             <div className="row g-2 align-items-center">
-                              <div className="col-sm-5">
-                                <input type="text" className="form-control bg-light border-0" value={editWord} onChange={(e) => setEditWord(e.target.value)} autoFocus placeholder="Thuật ngữ" />
+                              <div className={isJa ? "col-sm-3" : "col-sm-5"}>
+                                <input type="text" className="form-control bg-white border-0 shadow-sm" value={editWord} onChange={(e) => setEditWord(e.target.value)} autoFocus placeholder="Thuật ngữ" />
                               </div>
-                              <div className="col-sm-5">
-                                <input type="text" className="form-control bg-light border-0" value={editMeaning} onChange={(e) => setEditMeaning(e.target.value)} placeholder="Định nghĩa" />
+                              {isJa && (
+                                <>
+                                  <div className="col-sm-2">
+                                    <input type="text" className="form-control bg-white border-0 shadow-sm" value={editHanviet} onChange={(e) => setEditHanviet(e.target.value)} placeholder="Hán Việt" />
+                                  </div>
+                                  <div className="col-sm-2">
+                                    <input type="text" className="form-control bg-white border-0 shadow-sm" value={editHiragana} onChange={(e) => setEditHiragana(e.target.value)} placeholder="Cách đọc" />
+                                  </div>
+                                </>
+                              )}
+                              <div className={isJa ? "col-sm-3" : "col-sm-5"}>
+                                <input type="text" className="form-control bg-white border-0 shadow-sm" value={editMeaning} onChange={(e) => setEditMeaning(e.target.value)} placeholder="Định nghĩa" />
                               </div>
                               <div className="col-sm-2 text-end">
-                                <button className="btn btn-success fw-bold me-2 px-3" onClick={() => handleSaveEdit(vocab.id)}>Lưu</button>
-                                <button className="btn btn-secondary fw-bold px-3" onClick={() => setEditingVocabId(null)}>Hủy</button>
+                                <button className="btn btn-success fw-bold me-2 px-3 rounded-pill" onClick={() => handleSaveEdit(vocab.id, vocabSet.id)}>Lưu</button>
+                                <button className="btn btn-secondary fw-bold px-3 rounded-pill" onClick={() => setEditingVocabId(null)}>Hủy</button>
                               </div>
                             </div>
                           ) : (
                             <div className="row align-items-center">
-                              <div className="col-sm-5 border-end border-2 border-light d-flex align-items-center gap-3">
+                              <div className={`${hasExtra ? 'col-sm-3' : 'col-sm-5'} border-end border-2 border-light d-flex align-items-center gap-3`}>
                                 <button 
-                                  className="btn btn-light rounded-circle border-0 d-flex align-items-center justify-content-center p-0 shadow-sm hover-scale transition-all"
-                                  style={{ width: '40px', height: '40px', color: '#8a2be2', fontSize: '1.2rem' }}
+                                  className="btn btn-white rounded-circle border-0 d-flex align-items-center justify-content-center p-0 shadow-sm hover-scale transition-all"
+                                  style={{ width: '40px', height: '40px', color: '#863bff', fontSize: '1.2rem', flexShrink: 0, backgroundColor: 'white' }}
                                   onClick={(e) => { e.stopPropagation(); setNoteModalVocab(vocab); }}
                                   title="Lưu vào Note"
                                 >📓</button>
@@ -552,38 +600,59 @@ function VocabularyList() {
                                   <div className="fw-bold fs-5 text-dark">{vocab.word}</div>
                                 </div>
                               </div>
-                              <div className="col-sm-5 text-dark ps-4 text-truncate fs-5">
+                              {hasExtra && (
+                                <>
+                                  <div className="col-sm-2 text-truncate ps-3" style={{ color: '#863bff' }}>
+                                    <span className="fw-bold small">{vocab.hanviet}</span>
+                                  </div>
+                                  <div className="col-sm-2 text-truncate text-info fw-bold ps-3">
+                                    <span className="small">{vocab.hiragana}</span>
+                                  </div>
+                                </>
+                              )}
+                              <div className={`${hasExtra ? 'col-sm-3' : 'col-sm-5'} text-dark ps-4 text-truncate fs-5`}>
                                 {vocab.meaning}
                               </div>
                               <div className="col-sm-2 text-end">
-                                <button className="btn btn-sm btn-light text-primary fw-bold px-3 py-2 me-2" onClick={() => handleEditClick(vocab)}>✏️ Sửa</button>
-                                <button className="btn btn-sm btn-light text-danger fw-bold px-2 py-2" onClick={() => handleDeleteVocab(vocab.id)}>🗑️</button>
+                                <button className="btn btn-sm btn-white text-primary fw-bold px-3 py-2 me-2 rounded-pill shadow-sm" onClick={() => handleEditClick(vocab)}>✏️ Sửa</button>
+                                <button className="btn btn-sm btn-white text-danger fw-bold px-3 py-2 rounded-pill shadow-sm" onClick={() => handleDeleteVocab(vocab.id, vocabSet.id)}>🗑️</button>
                               </div>
                             </div>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
 
                       {addingToSetId === vocabSet.id ? (
-                        <div className="list-group-item bg-white p-4 border-top border-primary border-2">
+                        <div className="list-group-item smooth-list-item-inner p-4 border-0 shadow-sm" style={{ borderLeft: '4px solid var(--bs-primary)' }}>
                           <div className="row g-2 align-items-center">
-                            <div className="col-sm-5">
-                              <input type="text" className="form-control bg-light border-0" value={newWord} onChange={(e) => setNewWord(e.target.value)} autoFocus placeholder="Từ vựng mới" />
+                            <div className={vocabSet.language !== 'en' ? "col-sm-3" : "col-sm-5"}>
+                              <input type="text" className="form-control bg-white border-0 shadow-sm" value={newWord} onChange={(e) => setNewWord(e.target.value)} autoFocus placeholder="Từ vựng mới" />
                             </div>
-                            <div className="col-sm-5">
-                              <input type="text" className="form-control bg-light border-0" value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="Định nghĩa" />
+                            {vocabSet.language !== 'en' && (
+                              <>
+                                <div className="col-sm-2">
+                                  <input type="text" className="form-control bg-white border-0 shadow-sm" value={newHanviet} onChange={(e) => setNewHanviet(e.target.value)} placeholder="Hán Việt" />
+                                </div>
+                                <div className="col-sm-2">
+                                  <input type="text" className="form-control bg-white border-0 shadow-sm" value={newHiragana} onChange={(e) => setNewHiragana(e.target.value)} placeholder="Cách đọc" />
+                                </div>
+                              </>
+                            )}
+                            <div className={vocabSet.language !== 'en' ? "col-sm-3" : "col-sm-5"}>
+                              <input type="text" className="form-control bg-white border-0 shadow-sm" value={newMeaning} onChange={(e) => setNewMeaning(e.target.value)} placeholder="Định nghĩa" />
                             </div>
                             <div className="col-sm-2 text-end">
-                              <button className="btn btn-primary fw-bold me-2 px-3" onClick={() => handleSaveNew(vocabSet.id)}>Lưu</button>
-                              <button className="btn btn-secondary fw-bold px-3" onClick={() => setAddingToSetId(null)}>Hủy</button>
+                              <button className="btn btn-primary fw-bold me-2 px-4 rounded-pill shadow-sm" onClick={() => handleSaveNew(vocabSet.id)}>Lưu</button>
+                              <button className="btn btn-secondary fw-bold px-3 rounded-pill shadow-sm" onClick={() => setAddingToSetId(null)}>Hủy</button>
                             </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="list-group-item bg-light p-3 text-center border-0 rounded-bottom-4">
+                        <div className="list-group-item bg-transparent p-3 text-center border-0 mt-2">
                           <button 
-                            className="btn btn-outline-primary fw-bold rounded-pill px-4" 
-                            style={{ borderStyle: 'dashed', borderWidth: '2px' }}
+                            className="btn btn-outline-primary fw-bold rounded-pill px-5 py-2 shadow-sm" 
+                            style={{ borderStyle: 'dashed', borderWidth: '2px', backgroundColor: 'rgba(134,59,255,0.05)' }}
                             onClick={() => handleAddClick(vocabSet.id)}
                           >
                             + Thêm thẻ mới

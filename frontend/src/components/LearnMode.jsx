@@ -7,15 +7,35 @@ import api from '../api/axiosConfig';
 import { playSound } from '../utils/audio'; // Import âm thanh
 import SetSelector from './SetSelector';
 import ContentTypeSelector from './ContentTypeSelector';
+import GameModeSelector from './GameModeSelector';
 
 const CHUNK_SIZE = 7;
 
 function LearnMode() {
-  const { sets, setSets, allVocabs, kanjiSets, setKanjiSets, loading, fetchSets, fetchAllVocabs, fetchKanjiSets } = useContext(VocabContext);
-  const [contentType, setContentType] = useState('vocab');
-  const [selectedSetId, setSelectedSetId] = useState('all');
+  const { sets, setSets, loading, fetchSets } = useContext(VocabContext);
+  const [selectedSetId, setSelectedSetId] = useState('lang_ja');
+  const [allData, setAllData] = useState([]); 
 
-  useEffect(() => { fetchSets(); fetchAllVocabs(); fetchKanjiSets(); }, [fetchSets, fetchAllVocabs, fetchKanjiSets]);
+  const targetSets = React.useMemo(() => {
+    if (!sets || sets.length === 0) return [];
+    const idStr = String(selectedSetId);
+    if (idStr.startsWith('lang_') || idStr.startsWith('all_')) {
+      const lang = idStr.replace('lang_', '').replace('all_', '');
+      if (lang === 'kanji') return sets.filter(s => s.type === 'kanji');
+      if (lang === 'en') return sets.filter(s => s.type !== 'kanji' && s.language === 'en');
+      return sets.filter(s => s.type !== 'kanji' && (s.language || 'ja') === 'ja');
+    }
+    if (idStr.startsWith('folder_')) {
+      const folderName = idStr.substring(7);
+      return sets.filter(s => (s.folder_path || '🏠 Thư mục gốc') === folderName);
+    }
+    const targetSet = sets.find(s => s.id == selectedSetId);
+    return targetSet ? [targetSet] : [];
+  }, [selectedSetId, sets]);
+
+  const currentContentType = (targetSets.length > 0 && targetSets.every(s => s.type === 'kanji')) ? 'kanji' : 'vocab';
+
+  useEffect(() => { fetchSets(); }, [fetchSets]);
 
   const [isStarted, setIsStarted] = useState(false);
   const [isReversed, setIsReversed] = useState(false); 
@@ -83,8 +103,9 @@ function LearnMode() {
     };
   }, []);
 
+
   const getFrontLabel = () => {
-    if (contentType === 'kanji') {
+    if (currentContentType === 'kanji') {
       const map = { kanji: 'Hán tự', hanviet: 'Hán Việt', hiragana: 'Phiên âm', meaning: 'Ý nghĩa' };
       return map[kanjiFront];
     }
@@ -92,25 +113,39 @@ function LearnMode() {
   };
 
   const getBackLabel = () => {
-    if (contentType === 'kanji') {
+    if (currentContentType === 'kanji') {
       const map = { kanji: 'Hán tự', hanviet: 'Hán Việt', hiragana: 'Phiên âm', meaning: 'Ý nghĩa' };
       return map[kanjiBack];
     }
     return isReversed ? 'Từ vựng' : 'Ý nghĩa';
   };
 
+  const hasFourFields = (() => {
+    if (currentContentType === 'kanji') return true;
+    if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
+    if (targetSets.length > 0) {
+      return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
+    }
+    return false;
+  })();
+
   const getQuestionText = (vocab) => {
     if (!vocab) return "";
-    return contentType === 'kanji' ? vocab[kanjiFront] : (isReversed ? vocab.meaning : vocab.word);
+    let front = currentContentType === 'kanji' ? kanjiFront : (hasFourFields ? (kanjiFront === 'kanji' ? 'word' : kanjiFront) : (isReversed ? 'meaning' : 'word'));
+    if (!vocab[front] && (front === 'hanviet' || front === 'hiragana')) front = 'word';
+    return vocab[front] || "";
   };
 
   const getAnswerText = (vocab) => {
     if (!vocab) return "";
-    return contentType === 'kanji' ? vocab[kanjiBack] : (isReversed ? vocab.word : vocab.meaning);
+    let back = currentContentType === 'kanji' ? kanjiBack : (hasFourFields ? (kanjiBack === 'meaning' && kanjiFront === 'kanji' ? 'meaning' : (kanjiBack === 'kanji' ? 'word' : kanjiBack)) : (isReversed ? 'word' : 'meaning'));
+    if (!vocab[back] && (back === 'hanviet' || back === 'hiragana')) back = 'meaning';
+    return vocab[back] || "";
   };
 
+
   const handleSwap = () => {
-    if (contentType === 'kanji') {
+    if (hasFourFields) {
       setKanjiFront(kanjiBack);
       setKanjiBack(kanjiFront);
     } else {
@@ -119,22 +154,19 @@ function LearnMode() {
   };
 
   const updateSRS = async (vocabId, isCorrect) => {
-    if (contentType === 'kanji') return; // Kanji chưa có SRS
+    if (currentContentType === 'kanji') return; // Kanji chưa có SRS
     if (srsAnsweredRefs.current.has(vocabId)) return;
     srsAnsweredRefs.current.add(vocabId);
     try { await api.put(`/vocabularies/${vocabId}/srs`, { is_correct: isCorrect }); } 
     catch (err) { console.error("Lỗi cập nhật SRS:", err); }
   };
 
-  const playAudio = (text, type = 'normal') => {
+  const playAudio = (text, type = 'normal', isEn = false) => {
     if (!text) return;
-    const hasJapanese = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text);
-    if (!hasJapanese) return;
-
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ja-JP';
+      utterance.lang = isEn ? 'en-US' : 'ja-JP';
       utterance.rate = type === 'error' ? 0.8 : 0.9;
       window.speechSynthesis.speak(utterance);
     }
@@ -143,40 +175,22 @@ function LearnMode() {
   const handleStart = async () => {
     let pool = [];
 
-    if (selectedSetId === 'all') {
-      if (contentType === 'kanji') {
-        const fullKanjiSets = await Promise.all(kanjiSets.map(async (s) => {
-          if (s.kanjis) return s;
-          const res = await api.get(`/kanji-sets/${s.id}`);
-          return res.data;
-        }));
-        setKanjiSets(fullKanjiSets);
-        pool = fullKanjiSets.flatMap(s => s.kanjis || []);
-      } else {
-        pool = allVocabs;
-      }
-    } else {
-      if (contentType === 'kanji') {
-        let targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
-        if (targetSet && !targetSet.kanjis) {
-          const res = await api.get(`/kanji-sets/${targetSet.id}`);
-          targetSet = res.data;
-          setKanjiSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
-        }
-        pool = targetSet?.kanjis || [];
-      } else {
-        let targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-        if (targetSet && !targetSet.vocabularies) {
-          const res = await api.get(`/sets/${targetSet.id}`);
-          targetSet = res.data;
-          setSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
-        }
-        pool = targetSet?.vocabularies || [];
-      }
-    }
+    if (targetSets.length === 0) return toast.warning("Không có học phần nào phù hợp!");
+
+    toast.info("Đang tải dữ liệu...", { autoClose: 1000 });
+    const fullSets = await Promise.all(targetSets.map(async (s) => {
+      if (s.vocabularies && s.vocabularies.length > 0) return s;
+      try {
+        const res = await api.get(`/sets/${s.id}`);
+        return res.data;
+      } catch (e) { return s; }
+    }));
+    
+    setSets(prev => prev.map(p => fullSets.find(fs => fs.id === p.id) || p));
+    pool = fullSets.flatMap(s => s.vocabularies || []);
 
     if (onlyDue) {
-      if (contentType === 'kanji') {
+      if (currentContentType === 'kanji') {
         return toast.warning("Chế độ ôn tập đến hạn (SRS) chưa hỗ trợ cho Kanji!");
       }
       const now = new Date();
@@ -196,8 +210,8 @@ function LearnMode() {
     setMode('choice');
     setCurrentRoundWords([...chunked[0]]);
     
-    const allData = contentType === 'kanji' ? kanjiSets.flatMap(s => s.kanjis || []) : allVocabs;
-    generateOptions(chunked[0][0], allData);
+    setAllData(pool);
+    generateOptions(chunked[0][0], pool);
     setStreak(0);
     setMaxStreak(0);
     srsAnsweredRefs.current.clear();
@@ -208,57 +222,63 @@ function LearnMode() {
 
   const generateOptions = (currentWord, allData) => {
     if (!currentWord) return;
-    const currentText = contentType === 'kanji' ? currentWord[kanjiBack] : currentWord.word;
-
-    const scoredAnswers = allData.filter(v => v.id !== currentWord.id).map(v => {
-      let score = 0;
-      const vText = contentType === 'kanji' ? v[kanjiBack] : v.word;
-      if (currentText && vText) {
-        currentText.split('').forEach(c => { if (vText.includes(c)) score += 1; });
-      }
-      return { ...v, score: score + Math.random() * 0.5 };
+    const isKatakana = (text) => /^[ァ-ヶー]+$/.test(text || '');
+    const currentLang = currentWord.language || 'ja';
+    
+    let validDistractors = allData.filter(v => {
+        if (v.id === currentWord.id) return false;
+        if (currentContentType === 'vocab' && (v.language || 'ja') !== currentLang) return false;
+        
+        const vBack = currentContentType === 'kanji' ? kanjiBack : (hasFourFields ? (kanjiBack === 'meaning' && kanjiFront === 'kanji' ? 'meaning' : (kanjiBack === 'kanji' ? 'word' : kanjiBack)) : (isReversed ? 'word' : 'meaning'));
+        if ((vBack === 'hanviet' || vBack === 'hiragana') && !v[vBack]) return false;
+        
+        return true;
     });
-    scoredAnswers.sort((a, b) => b.score - a.score);
 
+    const maxSampleSize = Math.min(validDistractors.length, 60);
+    const sampleVocabs = [...validDistractors].sort(() => 0.5 - Math.random()).slice(0, maxSampleSize);
+    const currentText = getAnswerText(currentWord);
+
+    const scoredAnswers = sampleVocabs.map(v => {
+        let itemScore = 0;
+        const vText = getAnswerText(v);
+        
+        if (currentText && vText) {
+          currentText.split('').forEach(c => { if (vText.includes(c)) itemScore += 1; });
+        }
+        
+        if (currentLang === 'ja' && isKatakana(currentText) && isKatakana(vText)) {
+          itemScore += 5;
+        }
+        
+        return { ...v, itemScore: itemScore + Math.random() * 1.5 }; 
+    });
+
+    scoredAnswers.sort((a, b) => b.itemScore - a.itemScore);
+    
+    let wrongAnswers = [];
     const normalizeStr = (text) => text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(',').map(s => s.trim()).filter(Boolean).sort().join(',');
-    const correctAnswerStr = getAnswerText(currentWord);
-    const normalizedCorrect = normalizeStr(correctAnswerStr);
-    const usedAnswers = new Set([normalizedCorrect]);
+    const normalizedCorrect = normalizeStr(getAnswerText(currentWord));
+    const usedNormalizedAnswers = new Set([normalizedCorrect]); 
     
-    let wrongOptions = [];
     for (let i = 0; i < scoredAnswers.length; i++) {
-      const rawAns = getAnswerText(scoredAnswers[i]);
-      const normAns = normalizeStr(rawAns);
-      if (!usedAnswers.has(normAns) && normAns !== "") {
-        wrongOptions.push(scoredAnswers[i]);
-        usedAnswers.add(normAns);
+      const rawAnsStr = getAnswerText(scoredAnswers[i]);
+      const normalizedAns = normalizeStr(rawAnsStr);
+      
+      if (!usedNormalizedAnswers.has(normalizedAns) && normalizedAns !== "") {
+        wrongAnswers.push(scoredAnswers[i]);
+        usedNormalizedAnswers.add(normalizedAns);
       }
-      if (wrongOptions.length === 3) break;
+      if (wrongAnswers.length === 3) break;
     }
     
-    if (wrongOptions.length < 3) {
-       const backupVocabs = [...allData].sort(() => 0.5 - Math.random());
-       for (let i = 0; i < backupVocabs.length; i++) {
-          if (backupVocabs[i].id === currentWord.id) continue;
-          const rawAns = getAnswerText(backupVocabs[i]);
-          const normAns = normalizeStr(rawAns);
-          if (!usedAnswers.has(normAns) && normAns !== "") {
-            wrongOptions.push(backupVocabs[i]);
-            usedAnswers.add(normAns);
-          }
-          if (wrongOptions.length === 3) break;
-       }
-    }
-
-    const choices = [...wrongOptions, currentWord].sort(() => 0.5 - Math.random());
-    setOptions(choices);
+    setOptions([...wrongAnswers, currentWord].sort(() => 0.5 - Math.random()));
   };
 
   const handleNextAfterFeedback = () => {
     setFeedback(null);
     setInputText('');
-    const allData = contentType === 'kanji' ? kanjiSets.flatMap(s => s.kanjis || []) : allVocabs;
-
+    
     if (currentWordIndex < currentRoundWords.length - 1) {
       const nextWord = currentRoundWords[currentWordIndex + 1];
       setCurrentWordIndex(currentWordIndex + 1);
@@ -287,7 +307,7 @@ function LearnMode() {
           setCurrentWordIndex(0);
           setCurrentRoundWords([...typingWords]);
         } else {
-          // Nếu tất cả từ đều bị sai ở phần trắc nghiệm -> bỏ qua vòng tự luận, đi thẳng sang Round mới
+          // Nß║┐u tß║Ñt cß║ú tß╗½ ─æß╗üu bß╗ï sai ß╗ƒ phß║ºn trß║»c nghiß╗çm -> bß╗Å qua v├▓ng tß╗▒ luß║¡n, ─æi thß║│ng sang Round mß╗¢i
           goToNextRound();
         }
       } else {
@@ -304,13 +324,13 @@ function LearnMode() {
     setIsShaking(true);
     setTimeout(() => setIsShaking(false), 400);
     
-    // Cơ chế Quizlet: Đẩy câu sai sang Round kế tiếp
+    // C╞í chß║┐ Quizlet: ─Éß║⌐y c├óu sai sang Round kß║┐ tiß║┐p
     setRounds(prev => {
       const newRounds = [...prev];
-      // Xóa từ này khỏi round hiện tại để vòng tự luận (typing) phía sau không hỏi lại
+      // X├│a tß╗½ n├áy khß╗Åi round hiß╗çn tß║íi ─æß╗â v├▓ng tß╗▒ luß║¡n (typing) ph├¡a sau kh├┤ng hß╗Åi lß║íi
       newRounds[currentRoundIndex] = newRounds[currentRoundIndex].filter(w => w.id !== currentWord.id);
       
-      // Đẩy vào round kế tiếp (hoặc tạo round mới nếu đang ở round cuối cùng)
+      // ─Éß║⌐y v├áo round kß║┐ tiß║┐p (hoß║╖c tß║ío round mß╗¢i nß║┐u ─æang ß╗ƒ round cuß╗æi c├╣ng)
       if (currentRoundIndex < newRounds.length - 1) {
         newRounds[currentRoundIndex + 1] = [...newRounds[currentRoundIndex + 1], currentWord];
       } else {
@@ -320,11 +340,11 @@ function LearnMode() {
     });
     
     setFeedback({ isCorrect: false, correctAnswer: correctAnswerText, yourAnswer: userAnsText });
-    playAudio(correctAnswerText, 'error');
+    playAudio(correctAnswerText, 'error', currentWord.language === 'en');
   };
 
   const handleCorrectAnswer = (currentWord) => {
-    playSound('correct'); // Tiếng ting đúng
+    playSound('correct'); // Tiß║┐ng ting ─æ├║ng
     vibrate(40);
     const newStreak = streak + 1;
     setStreak(newStreak);
@@ -390,13 +410,11 @@ function LearnMode() {
           <h3 className="text-center mb-5 fw-bold text-dark">Cài đặt Chế độ Học</h3>
           
           <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-2">1. Chọn loại nội dung:</label>
-            <ContentTypeSelector contentType={contentType} setContentType={setContentType} />
-          </div>
-
-          <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-2">2. Chọn học phần muốn học:</label>
-            <SetSelector sets={contentType === 'kanji' ? kanjiSets : sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
+            <label className="form-label fw-bold text-muted mb-2">1. Chọn học phần muốn học:</label>
+            <SetSelector 
+              sets={sets} 
+              selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} 
+            />
           </div>
 
           <div className="mb-4 text-start">
@@ -406,46 +424,19 @@ function LearnMode() {
             </div>
           </div>
 
-          <div className="d-flex align-items-center justify-content-between bg-light p-3 rounded-4 border-0 mb-5 shadow-sm transition-all">
-            <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
-              <span className="text-muted small fw-bold d-block mb-1 text-truncate">HỆ THỐNG HỎI</span>
-              {contentType === 'kanji' ? (
-                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1" style={{ color: '#8a2be2', maxWidth: '140px' }} value={kanjiFront} onChange={(e) => setKanjiFront(e.target.value)}>
-                    <option value="kanji" className="text-dark">Hán tự</option>
-                    <option value="hanviet" className="text-dark">Hán Việt</option>
-                    <option value="hiragana" className="text-dark">Phiên âm</option>
-                    <option value="meaning" className="text-dark">Ý nghĩa</option>
-                  </select>
-              ) : (
-                  <span className="fw-bold fs-5 text-truncate d-block mt-2" style={{ color: '#8a2be2' }}>{getFrontLabel()}</span>
-              )}
-            </div>
-            
-            <div className="px-2 px-md-3" style={{ flexShrink: 0 }}>
-              <button 
-                type="button"
-                className="btn btn-warning rounded-circle shadow-sm fw-bold d-flex align-items-center justify-content-center transition-all hover-scale m-0" 
-                style={{width: '48px', height: '48px', fontSize: '1.2rem'}}
-                onClick={handleSwap}
-                title="Đảo chiều câu hỏi"
-              >
-                🔄
-              </button>
-            </div>
-            
-            <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
-              <span className="text-muted small fw-bold d-block mb-1 text-truncate">BẠN TRẢ LỜI</span>
-              {contentType === 'kanji' ? (
-                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1 text-success" style={{ maxWidth: '140px' }} value={kanjiBack} onChange={(e) => setKanjiBack(e.target.value)}>
-                    <option value="kanji" className="text-dark">Hán tự</option>
-                    <option value="hanviet" className="text-dark">Hán Việt</option>
-                    <option value="hiragana" className="text-dark">Phiên âm</option>
-                    <option value="meaning" className="text-dark">Ý nghĩa</option>
-                  </select>
-              ) : (
-                  <span className="fw-bold text-success fs-5 text-truncate d-block mt-2">{getBackLabel()}</span>
-              )}
-            </div>
+          <div className="mb-5">
+            <GameModeSelector
+              hasFourFields={hasFourFields}
+              currentContentType={currentContentType}
+              isReversed={isReversed}
+              setIsReversed={setIsReversed}
+              kanjiFront={kanjiFront}
+              setKanjiFront={setKanjiFront}
+              kanjiBack={kanjiBack}
+              setKanjiBack={setKanjiBack}
+              onSwap={handleSwap}
+              sectionLabel="Chọn kỹ năng rèn luyện"
+            />
           </div>
 
           <button className="btn btn-primary btn-lg w-100 fw-bold shadow-lg" style={{ borderRadius: '14px', padding: '15px', backgroundColor: '#8a2be2', border: 'none' }} onClick={handleStart}>
@@ -463,43 +454,46 @@ function LearnMode() {
   const progressPercent = Math.round(((currentRoundIndex + modeOffset + wordProgress) / rounds.length) * 100) || 0;
 
   return (
-    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : {}}>
-      <div className="mx-auto" style={{ maxWidth: '650px', width: '100%' }}>
-        
-        {!isFinished && (
-          <>
-            <div className="d-flex justify-content-between align-items-center mb-3">
-              <button className="btn btn-light rounded-circle shadow-sm border-0 d-print-none hover-bg-light transition-all" onClick={toggleFullscreen} title="Toàn màn hình (F)">
-                {isFullscreen ? '↙️' : '⛶'}
-              </button>
-              <div className="d-flex align-items-center gap-3 fw-bold text-muted">
-                {streak > 0 && (
-                  <div className="streak-indicator d-flex align-items-center bg-white rounded-pill shadow-sm border overflow-hidden fade-in" style={{ height: '38px', borderColor: streak >= 5 ? '#dc3545' : '#ffc107' }}>
-                    <div className={`px-3 h-100 d-flex align-items-center fw-bold fs-6 text-white ${streak >= 5 ? 'bg-danger streak-glow' : 'bg-warning text-dark'}`}>
-                      🔥 {streak}
-                    </div>
-                    <div className="d-flex align-items-center gap-1 px-2" style={{ width: '70px' }}>
-                      {[...Array(5)].map((_, i) => {
-                        const isActive = i < (streak > 0 ? ((streak - 1) % 5) + 1 : 0);
-                        return (
-                          <div 
-                            key={i} 
-                            className={`rounded-pill ${isActive ? (streak >= 5 ? 'bg-danger' : 'bg-warning') : 'bg-light'}`} 
-                            style={{ height: '6px', flexGrow: 1, transition: 'all 0.3s ease', transform: isActive ? 'scaleY(1.5)' : 'scaleY(1)' }}
-                          ></div>
-                        );
-                      })}
-                    </div>
+    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''} ${isShaking ? 'screen-flash-error' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : { minHeight: '100vh' }}>
+      
+      {!isFinished && (
+        <div className="sticky-top bg-white py-2 z-3 shadow-sm mb-4 rounded-bottom-4 px-3" style={{ top: 0, margin: '-1.5rem -0.75rem 0', transition: 'all 0.3s ease' }}>
+          <div className="mx-auto d-flex justify-content-between align-items-center mb-2" style={{ maxWidth: '650px', width: '100%' }}>
+            <button className="btn btn-light rounded-circle shadow-sm border-0 d-print-none hover-bg-light transition-all tap-effect" onClick={toggleFullscreen} title="Toàn màn hình (F)">
+              {isFullscreen ? '↙️' : '⛶'}
+            </button>
+            <div className="d-flex align-items-center gap-3 fw-bold text-muted">
+              {streak > 0 && (
+                <div key={streak} className="streak-indicator d-flex align-items-center bg-white rounded-pill shadow-sm border overflow-hidden streak-pop" style={{ height: '38px', borderColor: streak >= 5 ? '#dc3545' : '#ffc107' }}>
+                  <div className={`px-3 h-100 d-flex align-items-center fw-bold fs-6 text-white ${streak >= 5 ? 'bg-danger streak-glow' : 'bg-warning text-dark'}`}>
+                    🔥 {streak}
                   </div>
-                )}
-                <span className="fs-5">{progressPercent}%</span>
-              </div>
+                  <div className="d-flex align-items-center gap-1 px-2" style={{ width: '70px' }}>
+                    {[...Array(5)].map((_, i) => {
+                      const isActive = i < (streak > 0 ? ((streak - 1) % 5) + 1 : 0);
+                      return (
+                        <div 
+                          key={i} 
+                          className={`rounded-pill ${isActive ? (streak >= 5 ? 'bg-danger' : 'bg-warning') : 'bg-light'}`} 
+                          style={{ height: '6px', flexGrow: 1, transition: 'all 0.3s ease', transform: isActive ? 'scaleY(1.5)' : 'scaleY(1)' }}
+                        ></div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <span className="fs-5 text-primary">{progressPercent}%</span>
             </div>
-            <div className="progress mb-4 shadow-sm" style={{ height: '10px', borderRadius: '10px' }}>
-              <div className="progress-bar" role="progressbar" style={{ width: `${progressPercent}%`, transition: 'width 0.4s ease', backgroundColor: '#8a2be2' }}></div>
+          </div>
+          <div className="progress mx-auto shadow-sm" style={{ height: '12px', borderRadius: '10px', maxWidth: '650px', backgroundColor: '#f0f0f0' }}>
+            <div className="progress-bar" role="progressbar" style={{ width: `${progressPercent}%`, transition: 'width 0.4s ease', backgroundColor: '#8a2be2', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)', animation: 'progressGlow 2s infinite linear' }}></div>
             </div>
-          </>
-        )}
+          </div>
+        </div>
+      )}
+
+      <div className="mx-auto mt-4" style={{ maxWidth: '650px', width: '100%' }}>
         
         {isFinished ? (
           <div className="card shadow-lg border-0 p-5 rounded-4 fade-in-slide mx-auto bg-white">
@@ -521,23 +515,32 @@ function LearnMode() {
                 </div>
               </div>
             </div>
-            <button className="btn btn-lg fw-bold w-100 shadow-sm text-white hover-scale" style={{ backgroundColor: '#8a2be2' }} onClick={handleExit}>Hoàn thành & Quay lại</button>
+            <button className="btn btn-lg fw-bold w-100 shadow-sm text-white hover-scale tap-effect" style={{ backgroundColor: '#8a2be2' }} onClick={handleExit}>Hoàn thành & Quay lại</button>
           </div>
         ) : (
           <div className={`card shadow-sm border-0 rounded-4 fade-in-slide ${isShaking ? 'shake border border-danger' : ''}`} key={`${currentRoundIndex}-${currentWordIndex}-${mode}-${feedback ? 'fb' : 'q'}`}>
             <div className="card-body p-4 p-md-5">
               {feedback ? (
-                <div className="text-center">
-                  <h5 className="text-danger fw-bold mb-4">❌ Chưa chính xác! Từ này sẽ được hỏi lại.</h5>
-                  <div className="p-4 mb-4 bg-light rounded-4 text-start border-start border-danger border-4 shadow-sm">
-                    <p className="mb-2"><strong>Câu hỏi:</strong> <span className="fs-5" style={{ color: '#8a2be2' }}>{questionText}</span></p>
-                    <p className="text-muted mb-3"><strong>Bạn chọn/gõ:</strong> <span className="text-decoration-line-through">{feedback.yourAnswer}</span></p>
-                    <p className="text-success fs-4 mb-0 fw-bold d-flex align-items-center">
-                      ✓ {feedback.correctAnswer}
-                      <button className="btn btn-sm btn-light rounded-circle ms-3 shadow-sm border transition-all hover-bg-light" onClick={() => playAudio(feedback.correctAnswer)} title="Nghe lại">🔊</button>
-                    </p>
+                <div className="text-center correct-answer-pop">
+                  <div className="mb-3">
+                    <span style={{ fontSize: '4rem' }}>😢</span>
                   </div>
-                  <button className="btn btn-primary btn-lg fw-bold w-100 mt-2 shadow-sm text-white hover-scale" style={{ backgroundColor: '#8a2be2' }} onClick={handleNextAfterFeedback} autoFocus>Đã hiểu, tiếp tục</button>
+                  <h4 className="text-danger fw-bold mb-4">Ối! Sai mất rồi.</h4>
+                  <div className="p-4 mb-4 rounded-4 text-start shadow-sm position-relative overflow-hidden" style={{ backgroundColor: '#fff0f0', border: '2px solid #ffcaca' }}>
+                    <div className="position-absolute" style={{ top: '-20px', right: '-20px', fontSize: '6rem', opacity: 0.1 }}>❌</div>
+                    <p className="mb-2 text-muted fw-bold">KHI HỎI VỀ:</p>
+                    <p className="fs-3 fw-bold mb-4" style={{ color: '#8a2be2' }}>{questionText}</p>
+                    <hr style={{ borderColor: '#ffcaca' }} />
+                    <p className="text-muted mb-2 fw-bold">BẠN ĐÃ CHỌN/GÕ:</p>
+                    <p className="text-danger text-decoration-line-through fs-5 mb-4">{feedback.yourAnswer}</p>
+                    <p className="text-success mb-1 fw-bold">ĐÁP ÁN ĐÚNG PHẢI LÀ:</p>
+                    <div className="d-flex align-items-center bg-white p-3 rounded-3 shadow-sm border border-success">
+                      <span className="fs-3 fw-bold text-success me-3">✓</span>
+                      <span className="fs-3 fw-bold text-dark flex-grow-1">{feedback.correctAnswer}</span>
+                      <button className="btn btn-light rounded-circle shadow-sm border transition-all hover-bg-light tap-effect" onClick={() => playAudio(feedback.correctAnswer, 'normal', currentWord?.language === 'en')} title="Nghe lại" style={{ width: '45px', height: '45px' }}>🔊</button>
+                    </div>
+                  </div>
+                  <button className="btn btn-primary btn-lg fw-bold w-100 mt-2 shadow-sm text-white hover-scale tap-effect" style={{ backgroundColor: '#8a2be2', padding: '15px' }} onClick={handleNextAfterFeedback} autoFocus>Đã hiểu, tiếp tục thôi!</button>
                 </div>
               ) : (
                 <div className="text-center">
@@ -547,7 +550,7 @@ function LearnMode() {
                   
                   <div className="d-flex justify-content-center align-items-center gap-3 mb-4">
                     <h3 className="text-dark fw-bold m-0" style={{ fontSize: '2.5rem' }}>{questionText}</h3>
-                    <button className="btn btn-light rounded-circle shadow-sm transition-all hover-bg-light" onClick={() => playAudio(questionText)} title="Phát âm">🔊</button>
+                    <button className="btn btn-light rounded-circle shadow-sm transition-all hover-bg-light tap-effect" onClick={() => playAudio(questionText, 'normal', currentWord?.language === 'en')} title="Phát âm">🔊</button>
                   </div>
                   
                   {mode === 'choice' ? (
@@ -555,7 +558,7 @@ function LearnMode() {
                       {options.map((opt, i) => (
                         <button 
                           key={opt.id} 
-                          className="btn btn-light border py-3 text-start px-4 fs-5 fw-bold hover-bg-light transition-all d-flex align-items-center shadow-sm" 
+                          className="btn btn-light border py-3 text-start px-4 fs-5 fw-bold hover-bg-light transition-all d-flex align-items-center shadow-sm tap-effect" 
                           style={{ borderRadius: '12px' }}
                           onClick={() => handleChoiceSubmit(opt)}
                         >
@@ -564,7 +567,7 @@ function LearnMode() {
                         </button>
                       ))}
                       <div className="mt-3 text-end">
-                        <button className="btn btn-link text-muted fw-bold text-decoration-none border-0 hover-scale" onClick={handleDontKnow}>Tôi không biết câu này 🤷‍♂️</button>
+                        <button className="btn btn-link text-muted fw-bold text-decoration-none border-0 hover-scale tap-effect" onClick={handleDontKnow}>Tôi không biết câu này 🤷‍♂️</button>
                       </div>
                     </div>
                   ) : (
@@ -579,8 +582,8 @@ function LearnMode() {
                         />
                       </div>
                       <div className="d-flex gap-3">
-                        <button type="button" className="btn btn-outline-secondary w-50 py-3 fs-5 fw-bold border hover-bg-light shadow-sm rounded-4" onClick={handleDontKnow}>Bỏ qua</button>
-                        <button type="submit" className="btn w-50 py-3 fs-5 fw-bold shadow-sm rounded-4 text-white hover-scale" style={{ backgroundColor: '#8a2be2' }}>Kiểm tra</button>
+                        <button type="button" className="btn btn-outline-secondary w-50 py-3 fs-5 fw-bold border hover-bg-light shadow-sm rounded-4 tap-effect" onClick={handleDontKnow}>Bỏ qua</button>
+                        <button type="submit" className="btn w-50 py-3 fs-5 fw-bold shadow-sm rounded-4 text-white hover-scale tap-effect" style={{ backgroundColor: '#8a2be2' }}>Kiểm tra</button>
                       </div>
                     </form>
                   )}

@@ -5,20 +5,17 @@ export const VocabContext = createContext();
 
 export const VocabProvider = ({ children }) => {
   const [sets, setSets] = useState([]);
-  const [allVocabs, setAllVocabs] = useState([]);
-  const [kanjiSets, setKanjiSets] = useState([]);
   const [globalStats, setGlobalStats] = useState({ total: 0 });
   const [loading, setLoading] = useState(false);
   
   const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(false); // Tắt nút xem thêm
-  const LIMIT = 1000; // Tải tối đa 1000 học phần trong 1 lần
+  const [hasMore, setHasMore] = useState(false);
+  const LIMIT = 1000;
   const [studyProgress, setStudyProgress] = useState(0);
 
   const [hasFetchedSets, setHasFetchedSets] = useState(false);
-  const [hasFetchedVocabs, setHasFetchedVocabs] = useState(false);
-  const [hasFetchedKanjiSets, setHasFetchedKanjiSets] = useState(false);
 
+  // Tải danh sách Học phần (Chỉ load tên và thông tin cơ bản, không load chi tiết từ vựng)
   const fetchSets = useCallback(async (isLoadMore = false, forceRefresh = false) => {
     if (hasFetchedSets && !isLoadMore && !forceRefresh) return;
     if (!isLoadMore) setLoading(true);
@@ -50,37 +47,15 @@ export const VocabProvider = ({ children }) => {
     }
   }, []);
 
-  const fetchAllVocabs = useCallback(async (forceRefresh = false) => {
-    if (hasFetchedVocabs && !forceRefresh) return;
-    setLoading(true);
-    try {
-      // Ép limit lên 100,000 để lấy toàn bộ từ vựng
-      const res = await api.get('/vocabularies?limit=100000'); 
-      setAllVocabs(res.data);
-      setHasFetchedVocabs(true);
-    } catch (error) {
-      console.error("Lỗi khi tải tất cả từ vựng:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [hasFetchedVocabs]);
-
-  const fetchKanjiSets = useCallback(async (forceRefresh = false) => {
-    if (hasFetchedKanjiSets && !forceRefresh) return;
-    setLoading(true);
-    try {
-      const res = await api.get('/kanji-sets');
-      setKanjiSets(res.data);
-      setHasFetchedKanjiSets(true);
-    } catch (error) {
-      console.error("Lỗi khi tải danh sách Kanji:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [hasFetchedKanjiSets]);
-
   return (
-    <VocabContext.Provider value={{ sets, setSets, allVocabs, kanjiSets, setKanjiSets, globalStats, fetchGlobalStats, loading, fetchSets, fetchAllVocabs, fetchKanjiSets, hasMore, studyProgress, setStudyProgress }}>
+    <VocabContext.Provider value={{ 
+      sets, setSets, 
+      globalStats, fetchGlobalStats, 
+      loading, setLoading,
+      fetchSets, 
+      hasMore, 
+      studyProgress, setStudyProgress 
+    }}>
       {children}
     </VocabContext.Provider>
   );

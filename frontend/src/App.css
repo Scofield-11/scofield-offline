@@ -256,40 +256,101 @@ a, button, .card, .flashcard-container, .nav-link-custom, .list-group-item {
   -webkit-overflow-scrolling: touch;
 }
 
-/* --- ANIMATIONS --- */
+/* --- MICRO-INTERACTIONS & MOTION --- */
+.tap-effect {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+.tap-effect:active {
+  transform: scale(0.95) !important;
+}
+
+.glow-effect-success {
+  animation: glowSuccess 0.5s ease-out;
+}
+@keyframes glowSuccess {
+  0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(40, 167, 69, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+
+.glow-effect-error {
+  animation: glowError 0.5s ease-out;
+}
+@keyframes glowError {
+  0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+  70% { box-shadow: 0 0 0 15px rgba(220, 53, 69, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+}
+
+/* Xoá hover trên mobile để tránh kẹt trạng thái */
+@media (hover: none) {
+  .hover-scale:hover, .btn:hover, .card:hover {
+    transform: none !important;
+    box-shadow: none !important; /* Trả về shadow mặc định, tuỳ thuộc class gốc */
+  }
+}
+
 .fade-in { animation: fadeIn 0.3s ease-in-out forwards; }
 .fade-in-slide { animation: fadeInSlide 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fadeInSlide { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
 
-.shake { animation: shakeError 0.4s ease-in-out; }
+.shake { animation: shakeError 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
 @keyframes shakeError {
-  0%, 100% { transform: translateX(0); }
-  25%, 75% { transform: translateX(-8px); }
-  50% { transform: translateX(8px); }
+  10%, 90% { transform: translate3d(-2px, 0, 0); }
+  20%, 80% { transform: translate3d(4px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-8px, 0, 0); }
+  40%, 60% { transform: translate3d(8px, 0, 0); }
+}
+
+/* --- GAMIFICATION: LearnMode & MatchMode --- */
+.screen-flash-error {
+  animation: screenFlashError 0.4s ease-out;
+}
+@keyframes screenFlashError {
+  0% { box-shadow: inset 0 0 0 50px rgba(220, 53, 69, 0.2); }
+  100% { box-shadow: inset 0 0 0 0 rgba(220, 53, 69, 0); }
+}
+
+.streak-pop {
+  animation: scaleBounce 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes scaleBounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.correct-answer-pop {
+  animation: popUpCorrect 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes popUpCorrect {
+  0% { transform: scale(0.8); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.match-card-matched {
+  animation: matchVanish 0.4s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
+  background-color: #28a745 !important;
+  color: white !important;
+  border-color: #28a745 !important;
+  box-shadow: 0 0 15px rgba(40, 167, 69, 0.6) !important;
+}
+@keyframes matchVanish {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.8; }
+  100% { transform: scale(0); opacity: 0; }
+}
+
+.match-card-ratio {
+  aspect-ratio: 1 / 1;
 }
 
 /* --- FLASHCARDS & MATCH --- */
 .flashcard-container {
-  perspective: 1000px; width: 100%; max-width: 450px; aspect-ratio: 1 / 1; margin: 0 auto; cursor: pointer;
+  width: 100%; max-width: 450px; aspect-ratio: 1 / 1; margin: 0 auto; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-.flashcard-inner {
-  position: relative; width: 100%; height: 100%;
-  transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
-  transform-style: preserve-3d; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1); border-radius: 24px;
-  will-change: transform; /* Ép render bằng GPU giúp lật mượt 60fps */
-  transform: translateZ(0); /* Kích hoạt hardware acceleration trên iOS cũ */
-}
-.flashcard-inner.flipped { transform: rotateY(180deg); }
-.flashcard-front, .flashcard-back {
-  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-  -webkit-backface-visibility: hidden; backface-visibility: hidden;
-  display: flex; align-items: center; justify-content: center;
-  font-size: clamp(1.2rem, 5vw, 2.2rem); font-weight: bold; border-radius: 24px;
-  border: 2px solid #e7e7e9; padding: 30px; text-align: center; box-sizing: border-box;
-}
-.flashcard-front { background-color: #ffffff; color: #333; }
-.flashcard-back { background-color: #863bff; color: #ffffff; transform: rotateY(180deg); border-color: #863bff; }
 
 .match-card { min-height: 100px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1.1rem; font-weight: 500; text-align: center; padding: 15px; }
 .match-card.selected { border: 3px solid #863bff !important; background-color: #f4ebff !important; }
@@ -430,4 +491,66 @@ a, button, .card, .flashcard-container, .nav-link-custom, .list-group-item {
 /* Bật gia tốc cuộn mượt (momentum scrolling) cho các vùng cuộn cục bộ trên iOS Safari */
 .overflow-auto, .table-responsive, [style*="overflow-y: auto"], [style*="overflowY: auto"] {
   -webkit-overflow-scrolling: touch !important;
+}
+/* --- TASK 4: DASHBOARD & LIBRARY OVERHAUL --- */
+.mesh-gradient-bg {
+  background: radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%), 
+              radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%), 
+              radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+  background-color: #f8f9fa;
+}
+
+.mesh-gradient-header {
+  background: radial-gradient(at 40% 20%, hsla(28,100%,74%,1) 0px, transparent 50%),
+              radial-gradient(at 80% 0%, hsla(189,100%,56%,1) 0px, transparent 50%),
+              radial-gradient(at 0% 50%, hsla(355,100%,93%,1) 0px, transparent 50%);
+  background-color: #863bff;
+}
+
+.glassmorphism-card {
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+}
+
+.search-bar-3d {
+  box-shadow: inset 0px 4px 10px rgba(0, 0, 0, 0.05), 0px 10px 20px rgba(134, 59, 255, 0.2) !important;
+  border: 1px solid rgba(255,255,255,0.8) !important;
+  border-radius: 50px !important;
+}
+
+/* Mac/Windows Folder Icon */
+.mac-folder-icon {
+  font-size: 3rem;
+  line-height: 1;
+  text-shadow: 0px 4px 10px rgba(0,0,0,0.1);
+  filter: drop-shadow(0px 4px 6px rgba(0, 0, 0, 0.15));
+}
+.mac-folder-card {
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
+  border: 1px solid #e0e0e0;
+  box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.05), -5px -5px 15px rgba(255, 255, 255, 0.8);
+  border-radius: 16px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.mac-folder-card:active {
+  transform: scale(0.96);
+  box-shadow: inset 5px 5px 10px rgba(0,0,0,0.05), inset -5px -5px 10px rgba(255,255,255,0.8);
+}
+
+/* Smooth List Item */
+.smooth-list-item {
+  border-radius: 24px;
+  background-color: #ffffff;
+  border: none !important;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.03);
+  margin-bottom: 24px;
+  padding: 8px;
+}
+.smooth-list-item-inner {
+  background-color: #fafafa;
+  border-radius: 20px;
+  margin-bottom: 12px;
 }

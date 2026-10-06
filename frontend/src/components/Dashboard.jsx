@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { VocabContext } from '../context/VocabContext';
-import localforage from 'localforage';
 
 function Dashboard() {
   const { sets } = useContext(VocabContext);
@@ -14,36 +13,6 @@ function Dashboard() {
 
   const [todayTests, setTodayTests] = useState(0);
   const [currentStreak, setCurrentStreak] = useState(0);
-
-  const handleExportJSON = async () => {
-    const db = await localforage.getItem('db');
-    if (!db) return alert('Chưa có dữ liệu để xuất!');
-    const blob = new Blob([JSON.stringify(db)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Scofield_Backup_${new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')}.json`;
-    a.click();
-  };
-
-  const handleImportJSON = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const data = JSON.parse(event.target.result);
-        if (window.confirm('Cảnh báo: Dữ liệu hiện tại sẽ bị ghi đè hoàn toàn. Chắc chắn tiếp tục?')) {
-          await localforage.setItem('db', data);
-          alert('✅ Phục hồi dữ liệu thành công! Ứng dụng sẽ tải lại.');
-          window.location.reload();
-        }
-      } catch (err) {
-        alert('❌ File không đúng định dạng!');
-      }
-    };
-    reader.readAsText(file);
-  };
 
   useEffect(() => {
     // Lấy 100 lịch sử gần nhất để tính toán chuỗi liên tiếp và bài làm hôm nay
@@ -130,39 +99,55 @@ function Dashboard() {
       <div className="row g-4 fade-in-slide align-items-stretch">
         {/* Tầng 1: Hero Banner (Tìm kiếm) */}
         <div className="col-12 position-relative" style={{ zIndex: 10 }}>
-          <div className="card shadow-sm border-0 rounded-4 bg-primary text-white h-100 position-relative overflow-visible p-3">
-            <div className="card-body p-4 position-relative text-center" style={{ zIndex: 2 }}>
-              <h3 className="fw-bold mb-3 display-6">Hôm nay bạn muốn học gì? 🚀</h3>
+          <div className="card border-0 rounded-4 mesh-gradient-header text-white h-100 position-relative p-3 shadow-lg">
+            
+            {/* Background wrapper to contain the blurred circles without clipping the dropdown */}
+            <div className="position-absolute top-0 start-0 w-100 h-100 overflow-hidden rounded-4" style={{ zIndex: 0, pointerEvents: 'none' }}>
+              <div className="position-absolute" style={{ top: '-10%', left: '-5%', width: '300px', height: '300px', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', filter: 'blur(40px)', zIndex: 1 }}></div>
+              <div className="position-absolute" style={{ bottom: '-10%', right: '-5%', width: '250px', height: '250px', background: 'rgba(134,59,255,0.2)', borderRadius: '50%', filter: 'blur(40px)', zIndex: 1 }}></div>
+            </div>
+
+            <div className="card-body p-4 p-md-5 position-relative text-center glassmorphism-card rounded-4" style={{ zIndex: 2 }}>
+              <h3 className="fw-bold mb-4 display-6 text-dark" style={{ textShadow: '0 2px 4px rgba(255,255,255,0.5)' }}>Hôm nay bạn muốn học gì? 🚀</h3>
               
-              <div className="position-relative mx-auto" style={{ maxWidth: '600px' }} ref={dropdownRef}>
-                <div className="input-group input-group-lg shadow-sm rounded-pill overflow-hidden">
-                  <span className="input-group-text bg-white border-0 ps-4">🔍</span>
+              <div className="position-relative mx-auto" style={{ maxWidth: '650px' }} ref={dropdownRef}>
+                <div className="input-group input-group-lg search-bar-3d bg-white p-1 rounded-pill d-flex align-items-center">
+                  <span className="input-group-text bg-transparent border-0 ps-4 fs-4 text-primary">🔍</span>
                   <input 
                     type="text" 
-                    className="form-control border-0 py-3 fw-bold text-dark shadow-none" 
+                    className="form-control border-0 py-3 fw-bold text-dark shadow-none bg-transparent" 
                     placeholder="Tìm kiếm từ vựng, ý nghĩa..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onFocus={() => { if(searchResults.length > 0) setShowDropdown(true); }}
                   />
+                  {searchQuery && (
+                    <button className="btn btn-link text-muted text-decoration-none border-0 pe-4 fs-5 transition-all hover-scale" onClick={() => {setSearchQuery(''); setShowDropdown(false);}}>
+                      ✖
+                    </button>
+                  )}
                 </div>
 
                 {showDropdown && (
-                  <div className="position-absolute w-100 bg-white shadow-lg rounded-4 mt-2 overflow-hidden text-start" style={{ zIndex: 1050, top: '100%', left: 0, border: '1px solid #eee' }}>
-                    <div style={{ maxHeight: '300px', overflowY: 'auto' }} className="p-2">
+                  <div className="position-absolute w-100 bg-white shadow-lg rounded-4 mt-3 overflow-hidden text-start fade-in-slide" style={{ zIndex: 1050, top: '100%', left: 0, border: '1px solid #eee' }}>
+                    <div style={{ maxHeight: '350px', overflowY: 'auto' }} className="p-2">
                       {isSearching ? (
-                        <div className="text-center p-3 text-muted">Đang tìm...</div>
+                        <div className="text-center p-3 text-muted fw-bold">Đang tìm kiếm... ✨</div>
                       ) : searchResults.length === 0 ? (
-                        <div className="text-center p-3 text-muted">Không tìm thấy kết quả phù hợp.</div>
+                        <div className="text-center p-3 text-muted fw-bold">Không tìm thấy kết quả phù hợp 🥲</div>
                       ) : (
                         searchResults.map((item, idx) => {
                           const parentSet = sets.find(s => s.id === item.set_id);
                           const setTitle = parentSet ? parentSet.title : 'Chưa phân loại';
                           return (
-                            <div key={idx} className="p-3 border-bottom border-light hover-bg-light transition-all rounded-3 mb-1">
+                            <div key={idx} className="p-3 border-bottom border-light hover-bg-light transition-all rounded-4 mb-1 cursor-pointer">
                               <div className="d-flex justify-content-between align-items-start mb-1">
-                                <div className="fw-bold fs-5 text-dark">{item.word}</div>
-                                <span className="badge bg-light text-primary border text-wrap text-end ms-3" style={{ fontSize: '0.75rem', maxWidth: '60%' }}>{setTitle}</span>
+                                <div>
+                                  <span className="fw-bold fs-5 text-dark">{item.word}</span>
+                                  {item.hanviet && <span className="ms-2 small fw-bold" style={{ color: '#863bff' }}>{item.hanviet}</span>}
+                                  {item.hiragana && <span className="ms-2 small text-info fw-bold">{item.hiragana}</span>}
+                                </div>
+                                <span className="badge bg-light text-primary border text-wrap text-end ms-3 rounded-pill px-3 py-2" style={{ fontSize: '0.75rem', maxWidth: '60%' }}>{setTitle}</span>
                               </div>
                               <div className="text-muted">{item.meaning}</div>
                             </div>
@@ -174,8 +159,6 @@ function Dashboard() {
                 )}
               </div>
             </div>
-            <div className="position-absolute" style={{ top: '-50%', left: '-5%', width: '300px', height: '300px', background: 'rgba(255,255,255,0.08)', borderRadius: '50%', zIndex: 1 }}></div>
-            <div className="position-absolute" style={{ bottom: '-30%', right: '-5%', width: '200px', height: '200px', background: 'rgba(255,255,255,0.12)', borderRadius: '50%', zIndex: 1 }}></div>
           </div>
         </div>
 
@@ -223,30 +206,6 @@ function Dashboard() {
               <span className="display-6 mb-2">📝</span>
               <span className="fs-5 mt-1">Kiểm tra</span>
             </Link>
-          </div>
-        </div>
-
-        {/* Sync Data Offline */}
-        <div className="col-12 mt-4">
-          <div className="card shadow-sm border-0 rounded-4 bg-white p-3">
-            <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
-              <div className="d-flex align-items-center gap-3">
-                <span className="fs-2">💾</span>
-                <div>
-                  <h6 className="fw-bold mb-0">Quản lý dữ liệu (Offline Mode)</h6>
-                  <small className="text-muted">Sao lưu hoặc phục hồi dữ liệu từ file JSON</small>
-                </div>
-              </div>
-              <div className="d-flex gap-2">
-                <input type="file" id="importJson" accept=".json" style={{ display: 'none' }} onChange={handleImportJSON} />
-                <button className="btn btn-outline-primary fw-bold px-4 rounded-pill" onClick={() => document.getElementById('importJson').click()}>
-                  📥 Nhập dữ liệu
-                </button>
-                <button className="btn btn-primary fw-bold px-4 rounded-pill text-white" onClick={handleExportJSON}>
-                  📤 Tải bản Backup
-                </button>
-              </div>
-            </div>
           </div>
         </div>
 

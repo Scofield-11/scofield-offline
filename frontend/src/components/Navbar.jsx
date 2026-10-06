@@ -8,7 +8,7 @@ function Navbar() {
 
   const navItems = [
     { path: "/", label: "Thư viện", icon: "📚" },
-    { path: "/kanji", label: "Kanji", icon: "⛩️" }, 
+    // Đã xóa dòng Kanji ở đây
     { path: "/flashcards", label: "Flashcards", icon: "🗂️" },
     { path: "/learn", label: "Học", icon: "🧠" },
     { path: "/test", label: "Kiểm tra", icon: "📝" },

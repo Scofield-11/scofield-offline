@@ -11,6 +11,7 @@ function AddVocabularyForm({ onAddSuccess, existingFolders = [], currentPath = "
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [language, setLanguage] = useState('ja');
   const fileInputRef = useRef(null);
 
   // Tự động chọn thư mục đích là thư mục người dùng đang đứng xem
@@ -30,12 +31,14 @@ function AddVocabularyForm({ onAddSuccess, existingFolders = [], currentPath = "
         response = await api.post("/vocabularies/bulk-import", {
           title: title.trim(),
           raw_text: bulkText,
-          folder_path: folderPath.trim() 
+          folder_path: folderPath.trim(),
+          language
         });
       } else {
         const formData = new FormData();
         formData.append("title", title.trim());
         formData.append("folder_path", folderPath.trim()); 
+        formData.append("language", language);
         formData.append("file", csvFile);
         response = await api.post("/vocabularies/import-csv", formData, {
           headers: { "Content-Type": "multipart/form-data" }
@@ -66,6 +69,9 @@ function AddVocabularyForm({ onAddSuccess, existingFolders = [], currentPath = "
       else toast.error("Vui lòng chỉ tải lên file định dạng .csv");
     }
   };
+
+  const jaPlaceholder = "男性 | NAM TÍNH | だんせい | đàn ông\n|  | けが | vết thương\n守ります | Bảo vệ, tuân thủ";
+  const enPlaceholder = "Desk | Cái bàn\nAccomplish | Hoàn thành, đạt được";
 
   return (
     <div className="card shadow-sm mb-5 border-0 rounded-4">
@@ -108,6 +114,26 @@ function AddVocabularyForm({ onAddSuccess, existingFolders = [], currentPath = "
             </div>
           </div>
 
+          <div className="mb-4 fade-in-slide">
+            <label className="text-muted small fw-bold mb-2">NGÔN NGỮ HỌC PHẦN</label>
+            <div className="d-flex gap-2">
+              <button 
+                className={`btn fw-bold px-4 py-2 ${language === 'ja' ? 'btn-primary shadow-sm' : 'btn-outline-secondary'}`}
+                onClick={() => setLanguage('ja')}
+                style={{ borderRadius: '10px' }}
+              >
+                🇯🇵 Tiếng Nhật (Hỗ trợ 2 cột &amp; 4 cột N3)
+              </button>
+              <button 
+                className={`btn fw-bold px-4 py-2 ${language === 'en' ? 'btn-primary shadow-sm' : 'btn-outline-secondary'}`}
+                onClick={() => setLanguage('en')}
+                style={{ borderRadius: '10px' }}
+              >
+                🇬🇧 Tiếng Anh / Khác (2 cột)
+              </button>
+            </div>
+          </div>
+
           <div className="mb-3 d-flex gap-3 fade-in-slide">
             <button className={`btn fw-bold ${importMode === 'text' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setImportMode('text')}>Dán văn bản</button>
             <button className={`btn fw-bold ${importMode === 'csv' ? 'btn-primary' : 'btn-outline-secondary'}`} onClick={() => setImportMode('csv')}>Tải lên file CSV</button>
@@ -115,11 +141,15 @@ function AddVocabularyForm({ onAddSuccess, existingFolders = [], currentPath = "
 
           {importMode === 'text' ? (
             <div className="mb-4 fade-in-slide">
-              <label className="text-muted small fw-bold mb-2">DANH SÁCH TỪ VỰNG (Từ vựng | Ý nghĩa)</label>
+              <label className="text-muted small fw-bold mb-2">
+                {language === 'ja' 
+                  ? 'DANH SÁCH TỪ VỰNG (Hỗ trợ 4 cột: Chữ Hán | Hán Việt | Cách đọc | Nghĩa HOẶC 2 cột: Từ vựng | Nghĩa)'
+                  : 'DANH SÁCH TỪ VỰNG (Từ vựng | Ý nghĩa)'}
+              </label>
               <textarea 
                   className="form-control bg-light border-0 p-3" 
                   rows="6" 
-                  placeholder="守ります | Bảo vệ, tuân thủ&#10;外します | Rời, không có ở&#10;Cái bàn | Desk"
+                  placeholder={language === 'ja' ? jaPlaceholder : enPlaceholder}
                   value={bulkText} onChange={(e) => setBulkText(e.target.value)}
                   style={{ resize: 'none', borderRadius: '12px', lineHeight: '1.6' }}
               ></textarea>

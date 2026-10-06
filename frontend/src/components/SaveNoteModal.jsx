@@ -14,6 +14,9 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
     if (noteSets.length > 0) setSelectedSetId(noteSets[0].id);
   }, []);
 
+  // Kiểm tra xem vocab có dữ liệu Hán Việt/Cách đọc không
+  const hasExtraFields = vocab && ((vocab.hanviet && vocab.hanviet.trim()) || (vocab.hiragana && vocab.hiragana.trim()));
+
   const handleSave = async (e) => {
     e.preventDefault();
     setIsSaving(true);
@@ -21,18 +24,27 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
       if (selectedSetId === 'new') {
         if (!noteSetName.trim()) { toast.warning("Nhập tên học phần Note!"); setIsSaving(false); return; }
         // Tạo học phần mới và nạp luôn từ vựng này vào
-        const rawText = `${vocab.word} | ${vocab.meaning}`;
+        let rawText;
+        if (hasExtraFields) {
+          rawText = `${vocab.word} | ${vocab.hanviet || ''} | ${vocab.hiragana || ''} | ${vocab.meaning}`;
+        } else {
+          rawText = `${vocab.word} | ${vocab.meaning}`;
+        }
         await api.post("/vocabularies/bulk-import", {
           title: noteSetName.trim(),
           raw_text: rawText,
-          folder_path: "Note"
+          folder_path: "Note",
+          language: vocab.language || "ja"
         });
         toast.success("Đã tạo và lưu vào Note mới!");
       } else {
         // Lưu vào học phần Note đã có
         await api.post('/vocabularies', {
           word: vocab.word,
+          hanviet: vocab.hanviet || "",
+          hiragana: vocab.hiragana || "",
           meaning: vocab.meaning,
+          language: vocab.language || "ja",
           set_id: selectedSetId
         });
         toast.success("Đã thêm vào Note!");
@@ -54,6 +66,12 @@ function SaveNoteModal({ vocab, sets, onClose, onSaveSuccess }) {
         <h5 className="fw-bold mb-3" style={{ color: '#8a2be2' }}>📓 Lưu vào Note</h5>
         <div className="bg-light p-3 rounded-3 mb-4 text-center shadow-sm">
           <div className="fw-bold fs-5 text-dark">{vocab.word}</div>
+          {vocab.hanviet && vocab.hanviet.trim() && (
+            <div className="small fw-bold mt-1" style={{ color: '#8a2be2' }}>{vocab.hanviet}</div>
+          )}
+          {vocab.hiragana && vocab.hiragana.trim() && (
+            <div className="small fw-bold text-info mt-1">{vocab.hiragana}</div>
+          )}
           <div className="text-primary mt-1 fw-bold">{vocab.meaning}</div>
         </div>
         

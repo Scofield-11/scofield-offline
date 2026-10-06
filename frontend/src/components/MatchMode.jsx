@@ -4,13 +4,31 @@ import { toast } from 'react-toastify';
 import LoadingSkeleton from './LoadingSkeleton';
 import confetti from 'canvas-confetti';
 import SetSelector from './SetSelector';
-import ContentTypeSelector from './ContentTypeSelector';
+import GameModeSelector from './GameModeSelector';
 
 function MatchMode() {
-  const { sets, setSets, allVocabs, kanjiSets, setKanjiSets, loading, fetchSets, fetchAllVocabs, fetchKanjiSets } = useContext(VocabContext);
-  const [contentType, setContentType] = useState('vocab');
-  const [selectedSetId, setSelectedSetId] = useState('all');
+  const { sets, setSets, loading, fetchSets } = useContext(VocabContext);
+  const [selectedSetId, setSelectedSetId] = useState('lang_ja');
   const [difficulty, setDifficulty] = useState(6); 
+
+  const targetSets = React.useMemo(() => {
+    if (!sets || sets.length === 0) return [];
+    const idStr = String(selectedSetId);
+    if (idStr.startsWith('lang_') || idStr.startsWith('all_')) {
+      const lang = idStr.replace('lang_', '').replace('all_', '');
+      if (lang === 'kanji') return sets.filter(s => s.type === 'kanji');
+      if (lang === 'en') return sets.filter(s => s.type !== 'kanji' && s.language === 'en');
+      return sets.filter(s => s.type !== 'kanji' && (s.language || 'ja') === 'ja');
+    }
+    if (idStr.startsWith('folder_')) {
+      const folderName = idStr.substring(7);
+      return sets.filter(s => (s.folder_path || '🏠 Thư mục gốc') === folderName);
+    }
+    const targetSet = sets.find(s => s.id == selectedSetId);
+    return targetSet ? [targetSet] : [];
+  }, [selectedSetId, sets]);
+
+  const currentContentType = (targetSets.length > 0 && targetSets.every(s => s.type === 'kanji')) ? 'kanji' : 'vocab'; 
   const [gameMode, setGameMode] = useState('normal'); 
   const [kanjiMatchA, setKanjiMatchA] = useState('kanji');
   const [kanjiMatchB, setKanjiMatchB] = useState('meaning');
@@ -26,23 +44,29 @@ function MatchMode() {
   
   const [showExitModal, setShowExitModal] = useState(false);
 
-  useEffect(() => { fetchSets(); fetchAllVocabs(); fetchKanjiSets(); }, [fetchSets, fetchAllVocabs, fetchKanjiSets]);
+  useEffect(() => { fetchSets(); }, [fetchSets]);
 
   useEffect(() => {
-    setBestTime(localStorage.getItem(`matchBest_${selectedSetId}_${difficulty}_${contentType}`) || null);
-    setHighScore(localStorage.getItem(`matchScore_${selectedSetId}_${contentType}`) || null);
-  }, [selectedSetId, difficulty, contentType]);
+    setBestTime(localStorage.getItem(`matchBest_${selectedSetId}_${difficulty}_${currentContentType}`) || null);
+    setHighScore(localStorage.getItem(`matchScore_${selectedSetId}_${currentContentType}`) || null);
+  }, [selectedSetId, difficulty, currentContentType]);
   
   const [isStarted, setIsStarted] = useState(false);
   const [cards, setCards] = useState([]);
   const [selectedCards, setSelectedCards] = useState([]);
   const [matchedIds, setMatchedIds] = useState([]);
   const [errorCards, setErrorCards] = useState([]); 
+  const [successCards, setSuccessCards] = useState([]); 
   const [isAnimating, setIsAnimating] = useState(false); 
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
 
   const vibrate = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
+
+  const handleSwap = () => {
+    setKanjiMatchA(kanjiMatchB);
+    setKanjiMatchB(kanjiMatchA);
+  };
 
   const toggleFullscreen = () => {
     if (!isFullscreen) {
@@ -100,7 +124,7 @@ function MatchMode() {
         setIsFinished(true);
         confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
         vibrate([100, 50, 100, 50, 200]);
-        const key = `matchBest_${selectedSetId}_${cards.length / 2}_${contentType}`;
+        const key = `matchBest_${selectedSetId}_${cards.length / 2}_${currentContentType}`;
         if (!bestTime || timeElapsed < bestTime) {
           localStorage.setItem(key, timeElapsed);
           setBestTime(timeElapsed);
@@ -108,59 +132,55 @@ function MatchMode() {
         }
       }
     }
-  }, [matchedIds, cards, gameMode, timeElapsed, bestTime, selectedSetId, contentType]);
+  }, [matchedIds, cards, gameMode, timeElapsed, bestTime, selectedSetId, currentContentType]);
 
   useEffect(() => {
     if (isFinished && gameMode === 'challenge') {
       confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
       vibrate([100, 50, 100, 50, 200]);
       if (!highScore || score > highScore) {
-        localStorage.setItem(`matchScore_${selectedSetId}_${contentType}`, score);
+        localStorage.setItem(`matchScore_${selectedSetId}_${currentContentType}`, score);
         setHighScore(score);
         toast.success(`🏆 Điểm cao mới: ${score} điểm!`);
       }
     }
-  }, [isFinished, gameMode, score, highScore, selectedSetId, contentType]);
+  }, [isFinished, gameMode, score, highScore, selectedSetId, currentContentType]);
+
+
 
   const getCardTexts = (vocab) => {
-    if (contentType === 'kanji') return [vocab[kanjiMatchA], vocab[kanjiMatchB]];
-    return [vocab.word, vocab.meaning];
+    const hasFourFields = (() => {
+      if (currentContentType === 'kanji') return true;
+      if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
+      if (targetSets.length > 0) {
+        return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
+      }
+      return false;
+    })();
+
+    let faceA = currentContentType === 'kanji' ? kanjiMatchA : (hasFourFields ? (kanjiMatchA === 'kanji' ? 'word' : kanjiMatchA) : 'word');
+    let faceB = currentContentType === 'kanji' ? kanjiMatchB : (hasFourFields ? (kanjiMatchB === 'meaning' && kanjiMatchA === 'kanji' ? 'meaning' : (kanjiMatchB === 'kanji' ? 'word' : kanjiMatchB)) : 'meaning');
+    if (!vocab[faceA] && (faceA === 'hanviet' || faceA === 'hiragana')) faceA = 'word';
+    if (!vocab[faceB] && (faceB === 'hanviet' || faceB === 'hiragana')) faceB = 'meaning';
+    
+    return [vocab[faceA] || "", vocab[faceB] || ""];
   };
 
+
+
   const generateCards = async () => {
-    let pool = [];
+    if (targetSets.length === 0) return toast.warning("Không có học phần nào phù hợp!");
+
+    const fullSets = await Promise.all(targetSets.map(async (s) => {
+      if (s.vocabularies && s.vocabularies.length > 0) return s;
+      try {
+        const res = await api.get(`/sets/${s.id}`);
+        return res.data;
+      } catch (e) { return s; }
+    }));
     
-    if (selectedSetId === 'all') {
-      if (contentType === 'kanji') {
-        const fullKanjiSets = await Promise.all(kanjiSets.map(async (s) => {
-          if (s.kanjis) return s;
-          const res = await api.get(`/kanji-sets/${s.id}`);
-          return res.data;
-        }));
-        setKanjiSets(fullKanjiSets);
-        pool = fullKanjiSets.flatMap(s => s.kanjis || []);
-      } else {
-        pool = allVocabs;
-      }
-    } else {
-      if (contentType === 'kanji') {
-        let targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
-        if (targetSet && !targetSet.kanjis) {
-          const res = await api.get(`/kanji-sets/${targetSet.id}`);
-          targetSet = res.data;
-          setKanjiSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
-        }
-        pool = targetSet?.kanjis || [];
-      } else {
-        let targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-        if (targetSet && !targetSet.vocabularies) {
-          const res = await api.get(`/sets/${targetSet.id}`);
-          targetSet = res.data;
-          setSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
-        }
-        pool = targetSet?.vocabularies || [];
-      }
-    }
+    setSets(prev => prev.map(p => fullSets.find(fs => fs.id === p.id) || p));
+    const pool = fullSets.flatMap(s => s.vocabularies || []);
 
     const actualDifficulty = Math.min(difficulty, pool.length);
     const pivotIndex = Math.floor(Math.random() * pool.length);
@@ -168,8 +188,8 @@ function MatchMode() {
     
     const scoredPool = pool.map(v => {
       let sc = v.id === pivotWord.id ? 999 : 0;
-      const currentText = contentType === 'kanji' ? pivotWord[kanjiMatchA] : pivotWord.word;
-      const vText = contentType === 'kanji' ? v[kanjiMatchA] : v.word;
+      const currentText = currentContentType === 'kanji' ? pivotWord[kanjiMatchA] : pivotWord.word;
+      const vText = currentContentType === 'kanji' ? v[kanjiMatchA] : v.word;
       if (currentText && vText) {
         currentText.split('').forEach(c => { if (vText.includes(c)) sc += 1; });
       }
@@ -187,24 +207,14 @@ function MatchMode() {
   };
 
   const startGame = async () => {
-    let poolLength = 0;
-    if (selectedSetId === 'all') {
-      poolLength = contentType === 'kanji' ? kanjiSets.reduce((sum, s) => sum + (s.vocab_count || 0), 0) : allVocabs.length;
-    } else {
-      if (contentType === 'kanji') {
-        const targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
-        poolLength = targetSet ? (targetSet.vocab_count || 0) : 0;
-      } else {
-        const targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-        poolLength = targetSet ? (targetSet.vocab_count || 0) : 0;
-      }
-    }
+    const poolLength = targetSets.reduce((sum, s) => sum + (s.vocab_count || 0), 0);
 
     if (poolLength < 2) return toast.warning(`Cần ít nhất 2 thẻ để chơi!`);
 
     await generateCards();
     setSelectedCards([]);
     setErrorCards([]);
+    setSuccessCards([]);
     setIsAnimating(false);
     setTimeElapsed(gameMode === 'challenge' ? 60 : 0);
     setScore(0);
@@ -233,12 +243,14 @@ function MatchMode() {
         setCombo(newCombo);
         setScore(s => s + (10 * newCombo));
         setLastMatchTime(now);
+        setSuccessCards([newSelected[0].id, newSelected[1].id]);
 
         setTimeout(() => {
           setMatchedIds(prev => [...prev, newSelected[0].matchId]);
           setSelectedCards([]);
+          setSuccessCards([]);
           setIsAnimating(false); 
-        }, 300);
+        }, 500);
       } else {
         vibrate([100, 50, 100]);
         setCombo(0); 
@@ -266,34 +278,59 @@ function MatchMode() {
               <button className={`btn w-50 fw-bold ${gameMode === 'challenge' ? 'btn-danger' : 'btn-outline-secondary'}`} onClick={() => setGameMode('challenge')}>Thử thách 60s</button>
             </div>
           </div>
-          <div className="mb-3">
-            <label className="form-label fw-bold text-muted">Chọn loại nội dung:</label>
-            <ContentTypeSelector contentType={contentType} setContentType={setContentType} />
-          </div>
-
-          <div className="mb-3">
+          <div className="mb-4">
             <label className="form-label fw-bold text-muted">Chọn học phần:</label>
-            <SetSelector sets={contentType === 'kanji' ? kanjiSets : sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
+            <SetSelector 
+              sets={sets} 
+              selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId}
+            />
           </div>
 
-          {contentType === 'kanji' && (
-            <div className="mb-3">
-              <label className="form-label fw-bold text-muted">Cặp thẻ muốn ghép:</label>
-              <div className="d-flex align-items-center justify-content-center gap-2 bg-light p-2 rounded-4 shadow-sm">
-                <select className="form-select bg-white border-0 fw-bold shadow-sm text-center text-primary" value={kanjiMatchA} onChange={(e) => setKanjiMatchA(e.target.value)}>
-                  <option value="kanji" className="text-dark">Hán tự</option>
-                  <option value="hanviet" className="text-dark">Hán Việt</option>
-                  <option value="hiragana" className="text-dark">Phiên âm</option>
-                  <option value="meaning" className="text-dark">Ý nghĩa</option>
-                </select>
-                <span className="fw-bold text-muted">↔</span>
-                <select className="form-select bg-white border-0 fw-bold shadow-sm text-center text-success" value={kanjiMatchB} onChange={(e) => setKanjiMatchB(e.target.value)}>
-                  <option value="kanji" className="text-dark">Hán tự</option>
-                  <option value="hanviet" className="text-dark">Hán Việt</option>
-                  <option value="hiragana" className="text-dark">Phiên âm</option>
-                  <option value="meaning" className="text-dark">Ý nghĩa</option>
-                </select>
-              </div>
+          {((() => {
+              if (currentContentType === 'kanji') return true;
+              if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
+              if (targetSets.length > 0) {
+                return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
+              }
+              return false;
+          })()) && (
+            <div className="mb-4">
+              <GameModeSelector
+                hasFourFields={true}
+                currentContentType={currentContentType}
+                kanjiFront={kanjiMatchA}
+                setKanjiFront={setKanjiMatchA}
+                kanjiBack={kanjiMatchB}
+                setKanjiBack={setKanjiMatchB}
+                onSwap={handleSwap}
+                sectionLabel="Luật chơi (Game Rules)"
+                presets={[
+                  {
+                    id: 'classic', icon: '🏛️', iconBg: '#ede9fe', label: 'Cổ điển',
+                    getDesc: (f, b) => f === 'meaning' ? 'Ý nghĩa ↔ Từ/Hán tự' : 'Từ/Hán tự ↔ Ý nghĩa',
+                    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'meaning',
+                    isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'meaning') || (f === 'meaning' && b === w); }
+                  },
+                  {
+                    id: 'speed', icon: '⚡', iconBg: '#fef3c7', label: 'Đua Tốc Độ',
+                    getDesc: (f, b) => f === 'hiragana' ? 'Phiên âm ↔ Từ/Hán tự' : 'Từ/Hán tự ↔ Phiên âm',
+                    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'hiragana',
+                    isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'hiragana') || (f === 'hiragana' && b === w); }
+                  },
+                  {
+                    id: 'hanviet', icon: '👑', iconBg: '#fee2e2', label: 'Vua Hán Tự',
+                    getDesc: (f, b) => f === 'meaning' ? 'Ý nghĩa ↔ Hán Việt' : 'Hán Việt ↔ Ý nghĩa',
+                    frontKey: () => 'hanviet', backKey: () => 'meaning',
+                    isActive: (f, b) => (f === 'hanviet' && b === 'meaning') || (f === 'meaning' && b === 'hanviet')
+                  },
+                  {
+                    id: 'listening', icon: '🎧', iconBg: '#dbeafe', label: 'Nghe Hiểu',
+                    getDesc: (f, b) => f === 'meaning' ? 'Ý nghĩa ↔ Phiên âm' : 'Phiên âm ↔ Ý nghĩa',
+                    frontKey: () => 'hiragana', backKey: () => 'meaning',
+                    isActive: (f, b) => (f === 'hiragana' && b === 'meaning') || (f === 'meaning' && b === 'hiragana')
+                  }
+                ]}
+              />
             </div>
           )}
 
@@ -375,27 +412,34 @@ function MatchMode() {
         ) : (
           <div className="row g-3 px-2">
             {cards.map(card => {
-              const isSelected = selectedCards.some(c => c.id === card.id);
+              const isSelected = selectedCards.some(c => c.id === card.id) && !successCards.includes(card.id);
               const isMatched = matchedIds.includes(card.matchId);
               const isError = errorCards.includes(card.id);
+              const isSuccess = successCards.includes(card.id);
               
               if (isMatched) {
                 return (
                   <div className="col-6 col-md-4 col-lg-3" key={card.id}>
-                    <div className="card h-100 border-0 bg-transparent" style={{ opacity: 0, cursor: 'default' }}><div className="card-body p-4"></div></div>
+                    <div className="card border-0 bg-transparent match-card-ratio" style={{ opacity: 0, cursor: 'default' }}></div>
                   </div>
                 );
               }
 
-              let cardClasses = 'bg-white text-dark hover-bg-light';
-              let cardStyles = { cursor: 'pointer', minHeight: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid transparent' };
+              let cardClasses = 'bg-white text-dark';
+              let cardStyles = { cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid transparent' };
+              
+              if (window.innerWidth > 768) {
+                cardStyles.minHeight = '120px';
+              }
+
               if (isSelected) { cardClasses = 'bg-primary text-white'; cardStyles.border = '3px solid var(--bs-primary)'; }
-              if (isError) { cardClasses = 'bg-danger text-white shake'; cardStyles.border = '3px solid #dc3545'; }
+              else if (isError) { cardClasses = 'bg-danger text-white shake'; cardStyles.border = '3px solid #dc3545'; }
+              else if (isSuccess) { cardClasses = 'match-card-matched'; cardStyles.border = '3px solid #28a745'; }
 
               return (
-                <div className="col-6 col-md-4 col-lg-3" key={card.id}>
-                  <div className={`card h-100 shadow-sm transition-all rounded-4 ${cardClasses}`} style={cardStyles} onClick={() => handleCardClick(card)}>
-                    <div className="card-body d-flex align-items-center justify-content-center p-3 text-wrap" style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{card.text}</div>
+                <div className="col-6 col-md-4 col-lg-3 d-flex" key={card.id}>
+                  <div className={`card w-100 shadow-sm transition-all rounded-4 tap-effect match-card-ratio ${cardClasses}`} style={cardStyles} onClick={() => handleCardClick(card)}>
+                    <div className="card-body d-flex align-items-center justify-content-center p-3 text-wrap text-center w-100" style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{card.text}</div>
                   </div>
                 </div>
               );

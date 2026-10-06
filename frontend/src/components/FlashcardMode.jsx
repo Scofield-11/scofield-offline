@@ -9,13 +9,32 @@ import api from '../api/axiosConfig';
 import { playSound } from '../utils/audio'; // Import âm thanh
 import SetSelector from './SetSelector';
 import ContentTypeSelector from './ContentTypeSelector';
+import GameModeSelector from './GameModeSelector';
 
 function FlashcardMode() {
-  const { sets, setSets, kanjiSets, setKanjiSets, allVocabs, loading, fetchSets, fetchKanjiSets, fetchAllVocabs } = useContext(VocabContext);
-  const [contentType, setContentType] = useState('vocab');
-  const [selectedSetId, setSelectedSetId] = useState('all');
+  const { sets, setSets, loading, fetchSets } = useContext(VocabContext);
+  const [selectedSetId, setSelectedSetId] = useState('lang_ja');
 
-  useEffect(() => { fetchSets(); fetchKanjiSets(); fetchAllVocabs(); }, [fetchSets, fetchKanjiSets, fetchAllVocabs]);
+  const targetSets = React.useMemo(() => {
+    if (!sets || sets.length === 0) return [];
+    const idStr = String(selectedSetId);
+    if (idStr.startsWith('lang_') || idStr.startsWith('all_')) {
+      const lang = idStr.replace('lang_', '').replace('all_', '');
+      if (lang === 'kanji') return sets.filter(s => s.type === 'kanji');
+      if (lang === 'en') return sets.filter(s => s.type !== 'kanji' && s.language === 'en');
+      return sets.filter(s => s.type !== 'kanji' && (s.language || 'ja') === 'ja');
+    }
+    if (idStr.startsWith('folder_')) {
+      const folderName = idStr.substring(7);
+      return sets.filter(s => (s.folder_path || '🏠 Thư mục gốc') === folderName);
+    }
+    const targetSet = sets.find(s => s.id == selectedSetId);
+    return targetSet ? [targetSet] : [];
+  }, [selectedSetId, sets]);
+
+  const currentContentType = (targetSets.length > 0 && targetSets.every(s => s.type === 'kanji')) ? 'kanji' : 'vocab';
+
+  useEffect(() => { fetchSets(); }, [fetchSets]);
   
   const [vocabsToStudy, setVocabsToStudy] = useState([]);
   const [isStarted, setIsStarted] = useState(false);
@@ -54,37 +73,21 @@ function FlashcardMode() {
   const handleStart = async () => {
     let pool = [];
 
-    if (selectedSetId === 'all') {
-      if (contentType === 'kanji') {
-        const fullKanjiSets = await Promise.all(kanjiSets.map(async (s) => {
-          if (s.kanjis) return s;
-          const res = await api.get(`/kanji-sets/${s.id}`);
-          return res.data;
-        }));
-        setKanjiSets(fullKanjiSets);
-        pool = fullKanjiSets.flatMap(s => s.kanjis || []);
-      } else {
-        pool = allVocabs;
-      }
-    } else {
-      if (contentType === 'kanji') {
-        let targetSet = kanjiSets.find(s => s.id === parseInt(selectedSetId));
-        if (targetSet && !targetSet.kanjis) {
-          const res = await api.get(`/kanji-sets/${targetSet.id}`);
-          targetSet = res.data;
-          setKanjiSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
-        }
-        pool = targetSet?.kanjis || [];
-      } else {
-        let targetSet = sets.find(s => s.id === parseInt(selectedSetId));
-        if (targetSet && !targetSet.vocabularies) {
-          const res = await api.get(`/sets/${targetSet.id}`);
-          targetSet = res.data;
-          setSets(prev => prev.map(s => s.id === targetSet.id ? targetSet : s));
-        }
-        pool = targetSet?.vocabularies || [];
-      }
-    }
+    if (targetSets.length === 0) return toast.warning("Không có học phần nào phù hợp!");
+
+    toast.info("Đang tải dữ liệu...", { autoClose: 1000 });
+    const fullSets = await Promise.all(targetSets.map(async (s) => {
+      if (s.vocabularies && s.vocabularies.length > 0) return s;
+      try {
+        const res = await api.get(`/sets/${s.id}`);
+        return res.data;
+      } catch (e) { return s; }
+    }));
+    
+    // Cập nhật lại context để lần sau không phải tải lại
+    setSets(prev => prev.map(p => fullSets.find(fs => fs.id === p.id) || p));
+    pool = fullSets.flatMap(s => s.vocabularies || []);
+
 
     if (pool.length === 0) return toast.warning("Học phần này chưa có dữ liệu!");
 
@@ -202,7 +205,7 @@ function FlashcardMode() {
   const handleQuickSave = async (e) => {
     e.preventDefault();
     try {
-      if (contentType === 'kanji') {
+      if (currentContentType === 'kanji') {
         await api.put(`/kanji/${editingVocab.id}`, editingVocab);
       } else {
         await api.put(`/vocabularies/${editingVocab.id}`, editingVocab);
@@ -217,6 +220,25 @@ function FlashcardMode() {
     } catch (err) { toast.error("Lỗi khi lưu!"); }
   };
 
+  const hasFourFields = (() => {
+    if (currentContentType === 'kanji') return true;
+    if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
+    if (targetSets.length > 0) {
+      return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
+    }
+    return false;
+  })();
+
+  const handleSwapClick = () => {
+    if (hasFourFields) {
+      const temp = kanjiFront;
+      setKanjiFront(kanjiBack === 'summary' ? 'meaning' : kanjiBack);
+      setKanjiBack(temp);
+    } else {
+      handleSwap();
+    }
+  };
+
   if (loading) return <LoadingSkeleton />;
 
   if (!isStarted) {
@@ -226,57 +248,31 @@ function FlashcardMode() {
           <h3 className="text-center mb-5 fw-bold text-dark" style={{ opacity: 0.8 }}>Thiết lập Flashcards</h3>
           
           <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-2">1. Chọn loại nội dung:</label>
-            <ContentTypeSelector contentType={contentType} setContentType={setContentType} />
+            <label className="form-label fw-bold text-muted mb-2">1. Chọn học phần muốn ôn:</label>
+            <SetSelector 
+              sets={sets} 
+              selectedSetId={selectedSetId} 
+              setSelectedSetId={setSelectedSetId} 
+            />
           </div>
 
-          <div className="mb-4">
-            <label className="form-label fw-bold text-muted mb-2">2. Chọn học phần muốn ôn:</label>
-            <SetSelector sets={contentType === 'kanji' ? kanjiSets : sets} selectedSetId={selectedSetId} setSelectedSetId={setSelectedSetId} />
-          </div>
-
-          <div className="mb-5 d-flex flex-column gap-3">
-            <div className="d-flex align-items-center justify-content-between bg-light p-3 rounded-4 border-0 shadow-sm transition-all">
-              <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
-                <span className="text-muted small fw-bold d-block mb-1 text-truncate">MẶT TRƯỚC</span>
-                {contentType === 'kanji' ? (
-                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1" style={{ color: '#8a2be2', maxWidth: '140px' }} value={kanjiFront} onChange={(e) => setKanjiFront(e.target.value)}>
-                    <option value="kanji" className="text-dark">Hán tự</option>
-                    <option value="hanviet" className="text-dark">Hán Việt</option>
-                    <option value="hiragana" className="text-dark">Phiên âm</option>
-                    <option value="meaning" className="text-dark">Ý nghĩa</option>
-                  </select>
-                ) : (
-                  <span className="fw-bold fs-5 text-truncate d-block mt-2" style={{ color: '#8a2be2' }}>{isReversed ? 'Ý nghĩa' : 'Từ vựng'}</span>
-                )}
-              </div>
-              
-              <div className="px-2 px-md-3" style={{ flexShrink: 0 }}>
-                <button 
-                  type="button"
-                  className="btn btn-warning rounded-circle shadow-sm fw-bold d-flex align-items-center justify-content-center transition-all hover-scale m-0" 
-                  style={{width: '48px', height: '48px', fontSize: '1.2rem'}}
-                  onClick={handleSwap}
-                  title="Đảo chiều thẻ"
-                >
-                  🔄
-                </button>
-              </div>
-              
-              <div className="text-center" style={{ flex: 1, minWidth: 0 }}>
-                <span className="text-muted small fw-bold d-block mb-1 text-truncate">MẶT SAU</span>
-                {contentType === 'kanji' ? (
-                  <select className="form-select bg-white border-0 fw-bold shadow-sm text-center mx-auto mt-1 text-success" style={{ maxWidth: '140px' }} value={kanjiBack} onChange={(e) => setKanjiBack(e.target.value)}>
-                    <option value="kanji" className="text-dark">Hán tự</option>
-                    <option value="hanviet" className="text-dark">Hán Việt</option>
-                    <option value="hiragana" className="text-dark">Phiên âm</option>
-                    <option value="meaning" className="text-dark">Ý nghĩa</option>
-                  </select>
-                ) : (
-                  <span className="fw-bold text-success fs-5 text-truncate d-block mt-2">{isReversed ? 'Từ vựng' : 'Ý nghĩa'}</span>
-                )}
-              </div>
-            </div>
+          <div className="mb-5">
+            <GameModeSelector
+              hasFourFields={hasFourFields}
+              currentContentType={currentContentType}
+              isReversed={isReversed}
+              setIsReversed={setIsReversed}
+              kanjiFront={kanjiFront}
+              setKanjiFront={setKanjiFront}
+              kanjiBack={kanjiBack}
+              setKanjiBack={setKanjiBack}
+              onSwap={handleSwap}
+              sectionLabel="Chọn chế độ lật thẻ"
+              twoFieldPresets={[
+                { id: 'forward', icon: '🧠', iconBg: '#ede9fe', label: 'Học Toàn Diện', description: 'Nhìn Từ vựng ➔ Đoán Ý nghĩa', reversedValue: false },
+                { id: 'backward', icon: '🇻🇳', iconBg: '#fef3c7', label: 'Hồi Tưởng', description: 'Nhìn Ý nghĩa ➔ Đoán Từ vựng', reversedValue: true },
+              ]}
+            />
           </div>
 
           <button 
@@ -319,7 +315,7 @@ function FlashcardMode() {
           <div className="card border-0 shadow-lg rounded-4 p-4" style={{ width: '90%', maxWidth: '400px' }}>
             <h5 className="fw-bold mb-4" style={{ color: '#8a2be2' }}>✏️ Sửa nhanh thẻ</h5>
             <form onSubmit={handleQuickSave}>
-              {contentType === 'kanji' ? (
+              {currentContentType === 'kanji' ? (
                 <>
                   <input type="text" className="form-control bg-light border-0 mb-3 fw-bold shadow-sm" value={editingVocab.kanji} onChange={e => setEditingVocab({...editingVocab, kanji: e.target.value})} placeholder="Kanji" required />
                   <input type="text" className="form-control bg-light border-0 mb-3 shadow-sm" value={editingVocab.hanviet} onChange={e => setEditingVocab({...editingVocab, hanviet: e.target.value})} placeholder="Hán Việt" required />
@@ -329,6 +325,12 @@ function FlashcardMode() {
               ) : (
                 <>
                   <input type="text" className="form-control bg-light border-0 mb-3 fw-bold shadow-sm" value={editingVocab.word} onChange={e => setEditingVocab({...editingVocab, word: e.target.value})} placeholder="Từ vựng" required />
+                  {(editingVocab.language || 'ja') === 'ja' && (
+                    <>
+                      <input type="text" className="form-control bg-light border-0 mb-3 shadow-sm" value={editingVocab.hanviet || ''} onChange={e => setEditingVocab({...editingVocab, hanviet: e.target.value})} placeholder="Hán Việt" />
+                      <input type="text" className="form-control bg-light border-0 mb-3 shadow-sm" value={editingVocab.hiragana || ''} onChange={e => setEditingVocab({...editingVocab, hiragana: e.target.value})} placeholder="Cách đọc" />
+                    </>
+                  )}
                   <input type="text" className="form-control bg-light border-0 mb-4 shadow-sm" value={editingVocab.meaning} onChange={e => setEditingVocab({...editingVocab, meaning: e.target.value})} placeholder="Ý nghĩa" required />
                 </>
               )}
@@ -370,14 +372,15 @@ function FlashcardMode() {
         <Flashcard 
           vocab={vocabsToStudy[currentIndex]} 
           autoPlay={autoPlay} 
-          contentType={contentType}
+          contentType={currentContentType}
           isReversed={isReversed}
           kanjiFront={kanjiFront}
-          kanjiBack={kanjiBack}
+          // NẾU LÀ TIẾNG NHẬT THÌ ÉP MẶT SAU LÀ SUMMARY
+          kanjiBack={hasFourFields ? 'summary' : kanjiBack}
           onEdit={setEditingVocab}
           onSaveNote={(item) => {
-            if (contentType === 'kanji') {
-              setNoteModalVocab({ word: item.kanji, furigana: item.hiragana, meaning: item.meaning });
+            if (currentContentType === 'kanji') {
+              setNoteModalVocab({ word: item.kanji, hanviet: item.hanviet, hiragana: item.hiragana, meaning: item.meaning, language: 'ja' });
             } else {
               setNoteModalVocab(item);
             }
