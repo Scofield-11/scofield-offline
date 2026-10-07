@@ -19,70 +19,28 @@ import './GameModeSelector.css';
 // ── Cấu hình mặc định cho 4-field (JP/Kanji) ──
 const DEFAULT_FOUR_FIELD_PRESETS = [
   {
-    id: 'translate',
-    icon: '🧠',
-    iconBg: '#ede9fe',
-    label: 'Luyện Dịch',
-    getDesc: (front, back, type) => {
-      const fLabel = front === 'meaning' ? 'Ý nghĩa' : 'Từ/Hán tự';
-      const bLabel = back === 'meaning' ? 'Ý nghĩa' : 'Từ/Hán tự';
-      return `${fLabel} ➔ ${bLabel}`;
-    },
-    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word',
-    backKey: () => 'meaning',
-    isActive: (front, back, type) => {
-      const wordKey = type === 'kanji' ? 'kanji' : 'word';
-      return ((front === wordKey) && back === 'meaning') || (front === 'meaning' && back === wordKey);
-    }
+    id: 'translate', icon: '🧠', iconBg: '#ede9fe', label: 'Luyện Dịch',
+    getDesc: (f, b, type) => { const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng'; return f === 'meaning' && (b === 'word' || b === 'kanji') ? `Ý nghĩa ➔ ${w}` : `${w} ➔ Ý nghĩa`; },
+    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'meaning',
+    isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'meaning') || (f === 'meaning' && b === w); }
   },
   {
-    id: 'reading',
-    icon: '🗣️',
-    iconBg: '#fef3c7',
-    label: 'Luyện Đọc',
-    getDesc: (front, back) => {
-      const fLabel = front === 'hiragana' ? 'Phiên âm' : 'Từ/Hán tự';
-      const bLabel = back === 'hiragana' ? 'Phiên âm' : 'Từ/Hán tự';
-      return `${fLabel} ➔ ${bLabel}`;
-    },
-    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word',
-    backKey: () => 'hiragana',
-    isActive: (front, back, type) => {
-      const wordKey = type === 'kanji' ? 'kanji' : 'word';
-      return ((front === wordKey) && back === 'hiragana') || (front === 'hiragana' && back === wordKey);
-    }
+    id: 'reading', icon: '🗣️', iconBg: '#fef3c7', label: 'Luyện Đọc',
+    getDesc: (f, b, type) => { const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng'; return f === 'hiragana' && (b === 'word' || b === 'kanji') ? `Phiên âm ➔ ${w}` : `${w} ➔ Phiên âm`; },
+    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'hiragana',
+    isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'hiragana') || (f === 'hiragana' && b === w); }
   },
   {
-    id: 'hanviet',
-    icon: '👑',
-    iconBg: '#fee2e2',
-    label: 'Vua Hán Tự',
-    getDesc: (front, back) => {
-      const fLabel = front === 'meaning' ? 'Ý nghĩa' : 'Hán Việt';
-      const bLabel = back === 'meaning' ? 'Ý nghĩa' : 'Hán Việt';
-      return `${fLabel} ➔ ${bLabel}`;
-    },
-    frontKey: () => 'hanviet',
-    backKey: () => 'meaning',
-    isActive: (front, back) => {
-      return (front === 'hanviet' && back === 'meaning') || (front === 'meaning' && back === 'hanviet');
-    }
+    id: 'hanviet', icon: '👑', iconBg: '#fee2e2', label: 'Vua Hán Tự',
+    getDesc: (f, b) => f === 'meaning' && b === 'hanviet' ? 'Ý nghĩa ➔ Hán Việt' : 'Hán Việt ➔ Ý nghĩa',
+    frontKey: () => 'hanviet', backKey: () => 'meaning',
+    isActive: (f, b) => (f === 'hanviet' && b === 'meaning') || (f === 'meaning' && b === 'hanviet')
   },
   {
-    id: 'listening',
-    icon: '🎧',
-    iconBg: '#dbeafe',
-    label: 'Nghe Hiểu',
-    getDesc: (front, back) => {
-      const fLabel = front === 'meaning' ? 'Ý nghĩa' : 'Phiên âm';
-      const bLabel = back === 'meaning' ? 'Ý nghĩa' : 'Phiên âm';
-      return `${fLabel} ➔ ${bLabel}`;
-    },
-    frontKey: () => 'hiragana',
-    backKey: () => 'meaning',
-    isActive: (front, back) => {
-      return (front === 'hiragana' && back === 'meaning') || (front === 'meaning' && back === 'hiragana');
-    }
+    id: 'listening', icon: '🎧', iconBg: '#dbeafe', label: 'Nghe Hiểu',
+    getDesc: (f, b) => f === 'meaning' && b === 'hiragana' ? 'Ý nghĩa ➔ Phiên âm' : 'Phiên âm ➔ Ý nghĩa',
+    frontKey: () => 'hiragana', backKey: () => 'meaning',
+    isActive: (f, b) => (f === 'hiragana' && b === 'meaning') || (f === 'meaning' && b === 'hiragana')
   }
 ];
 

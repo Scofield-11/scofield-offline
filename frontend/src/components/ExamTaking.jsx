@@ -36,21 +36,17 @@ function ExamTaking({ examData, isInstantFeedback, backToList, fetchHistory, ope
       user_ans: answers[q.id]
     }));
 
-    // LƯU LỊCH SỬ VÀO LOCALSTORAGE ĐỂ TÁCH BIỆT THEO TÊN MIỀN
-    const newRecord = {
-      id: Date.now(),
-      examId: examData.id,
-      title: examData.title,
-      score: scoreCount,
-      total: examData.questions.length,
-      date: new Date().toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }),
-      wrongDetails: wrongDetails
-    };
-
-    const currentHistory = JSON.parse(localStorage.getItem('scofieldExamHistory') || '[]');
-    localStorage.setItem('scofieldExamHistory', JSON.stringify([newRecord, ...currentHistory]));
-    
-    fetchHistory(); 
+    // LƯU LỊCH SỬ THÔNG QUA API
+    try {
+      await api.post(`/exams/${examData.id}/history`, {
+        score: scoreCount,
+        total: examData.questions.length,
+        wrong_details: wrongDetails
+      });
+      fetchHistory(); 
+    } catch (error) {
+      toast.error("Lỗi khi lưu lịch sử làm bài!");
+    }
   };
 
   const handleCreateFromCurrentMistakes = async () => {

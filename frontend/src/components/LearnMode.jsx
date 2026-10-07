@@ -4,10 +4,10 @@ import { toast } from 'react-toastify';
 import LoadingSkeleton from './LoadingSkeleton';
 import confetti from 'canvas-confetti';
 import api from '../api/axiosConfig';
-import { playSound } from '../utils/audio'; // Import âm thanh
+import { playSound } from '../utils/audio';
 import SetSelector from './SetSelector';
-import ContentTypeSelector from './ContentTypeSelector';
 import GameModeSelector from './GameModeSelector';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const CHUNK_SIZE = 7;
 
@@ -103,6 +103,14 @@ function LearnMode() {
     };
   }, []);
 
+  const hasFourFields = (() => {
+    if (currentContentType === 'kanji') return true;
+    if (String(selectedSetId).includes('ja') || String(selectedSetId).includes('kanji')) return true;
+    if (targetSets.length > 0) {
+      return targetSets.some(s => s.language === 'ja' || (s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana)));
+    }
+    return false;
+  })();
 
   const getFrontLabel = () => {
     if (currentContentType === 'kanji') {
@@ -120,15 +128,6 @@ function LearnMode() {
     return isReversed ? 'Từ vựng' : 'Ý nghĩa';
   };
 
-  const hasFourFields = (() => {
-    if (currentContentType === 'kanji') return true;
-    if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
-    if (targetSets.length > 0) {
-      return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
-    }
-    return false;
-  })();
-
   const getQuestionText = (vocab) => {
     if (!vocab) return "";
     let front = currentContentType === 'kanji' ? kanjiFront : (hasFourFields ? (kanjiFront === 'kanji' ? 'word' : kanjiFront) : (isReversed ? 'meaning' : 'word'));
@@ -143,7 +142,6 @@ function LearnMode() {
     return vocab[back] || "";
   };
 
-
   const handleSwap = () => {
     if (hasFourFields) {
       setKanjiFront(kanjiBack);
@@ -154,19 +152,22 @@ function LearnMode() {
   };
 
   const updateSRS = async (vocabId, isCorrect) => {
-    if (currentContentType === 'kanji') return; // Kanji chưa có SRS
+    if (currentContentType === 'kanji') return; 
     if (srsAnsweredRefs.current.has(vocabId)) return;
     srsAnsweredRefs.current.add(vocabId);
     try { await api.put(`/vocabularies/${vocabId}/srs`, { is_correct: isCorrect }); } 
     catch (err) { console.error("Lỗi cập nhật SRS:", err); }
   };
 
-  const playAudio = (text, type = 'normal', isEn = false) => {
+  const playAudio = (text, type = 'normal') => {
     if (!text) return;
+    const hasJapanese = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text);
+    if (!hasJapanese) return;
+
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = isEn ? 'en-US' : 'ja-JP';
+      utterance.lang = 'ja-JP';
       utterance.rate = type === 'error' ? 0.8 : 0.9;
       window.speechSynthesis.speak(utterance);
     }
@@ -174,7 +175,6 @@ function LearnMode() {
 
   const handleStart = async () => {
     let pool = [];
-
     if (targetSets.length === 0) return toast.warning("Không có học phần nào phù hợp!");
 
     toast.info("Đang tải dữ liệu...", { autoClose: 1000 });
@@ -190,9 +190,7 @@ function LearnMode() {
     pool = fullSets.flatMap(s => s.vocabularies || []);
 
     if (onlyDue) {
-      if (currentContentType === 'kanji') {
-        return toast.warning("Chế độ ôn tập đến hạn (SRS) chưa hỗ trợ cho Kanji!");
-      }
+      if (currentContentType === 'kanji') return toast.warning("Chế độ ôn tập đến hạn (SRS) chưa hỗ trợ cho Kanji!");
       const now = new Date();
       pool = pool.filter(v => v.next_review && new Date(v.next_review) <= now);
       if (pool.length === 0) return toast.success("Tuyệt vời! Không có từ vựng nào đến hạn.");
@@ -220,51 +218,43 @@ function LearnMode() {
     if (!isFullscreen) toggleFullscreen();
   };
 
-  const generateOptions = (currentWord, allData) => {
+  const generateOptions = (currentWord, fullData) => {
     if (!currentWord) return;
     const isKatakana = (text) => /^[ァ-ヶー]+$/.test(text || '');
     const currentLang = currentWord.language || 'ja';
     
-    let validDistractors = allData.filter(v => {
-        if (v.id === currentWord.id) return false;
+    let validDistractors = fullData.filter(v => {
+        if (!v || v.id === currentWord.id) return false;
         if (currentContentType === 'vocab' && (v.language || 'ja') !== currentLang) return false;
-        
         const vBack = currentContentType === 'kanji' ? kanjiBack : (hasFourFields ? (kanjiBack === 'meaning' && kanjiFront === 'kanji' ? 'meaning' : (kanjiBack === 'kanji' ? 'word' : kanjiBack)) : (isReversed ? 'word' : 'meaning'));
         if ((vBack === 'hanviet' || vBack === 'hiragana') && !v[vBack]) return false;
-        
         return true;
     });
 
     const maxSampleSize = Math.min(validDistractors.length, 60);
     const sampleVocabs = [...validDistractors].sort(() => 0.5 - Math.random()).slice(0, maxSampleSize);
-    const currentText = getAnswerText(currentWord);
+    const currentText = getAnswerText(currentWord) || '';
 
     const scoredAnswers = sampleVocabs.map(v => {
         let itemScore = 0;
-        const vText = getAnswerText(v);
-        
+        const vText = getAnswerText(v) || '';
         if (currentText && vText) {
           currentText.split('').forEach(c => { if (vText.includes(c)) itemScore += 1; });
         }
-        
-        if (currentLang === 'ja' && isKatakana(currentText) && isKatakana(vText)) {
-          itemScore += 5;
-        }
-        
+        if (currentLang === 'ja' && isKatakana(currentText) && isKatakana(vText)) itemScore += 5;
         return { ...v, itemScore: itemScore + Math.random() * 1.5 }; 
     });
 
     scoredAnswers.sort((a, b) => b.itemScore - a.itemScore);
     
     let wrongAnswers = [];
-    const normalizeStr = (text) => text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(',').map(s => s.trim()).filter(Boolean).sort().join(',');
+    const normalizeStr = (text) => (text || '').toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").split(',').map(s => s.trim()).filter(Boolean).sort().join(',');
     const normalizedCorrect = normalizeStr(getAnswerText(currentWord));
     const usedNormalizedAnswers = new Set([normalizedCorrect]); 
     
     for (let i = 0; i < scoredAnswers.length; i++) {
-      const rawAnsStr = getAnswerText(scoredAnswers[i]);
+      const rawAnsStr = getAnswerText(scoredAnswers[i]) || '';
       const normalizedAns = normalizeStr(rawAnsStr);
-      
       if (!usedNormalizedAnswers.has(normalizedAns) && normalizedAns !== "") {
         wrongAnswers.push(scoredAnswers[i]);
         usedNormalizedAnswers.add(normalizedAns);
@@ -278,7 +268,7 @@ function LearnMode() {
   const handleNextAfterFeedback = () => {
     setFeedback(null);
     setInputText('');
-    
+
     if (currentWordIndex < currentRoundWords.length - 1) {
       const nextWord = currentRoundWords[currentWordIndex + 1];
       setCurrentWordIndex(currentWordIndex + 1);
@@ -307,7 +297,6 @@ function LearnMode() {
           setCurrentWordIndex(0);
           setCurrentRoundWords([...typingWords]);
         } else {
-          // Nß║┐u tß║Ñt cß║ú tß╗½ ─æß╗üu bß╗ï sai ß╗ƒ phß║ºn trß║»c nghiß╗çm -> bß╗Å qua v├▓ng tß╗▒ luß║¡n, ─æi thß║│ng sang Round mß╗¢i
           goToNextRound();
         }
       } else {
@@ -321,16 +310,13 @@ function LearnMode() {
     vibrate([200, 100, 200]); 
     setStreak(0);
     updateSRS(currentWord.id, false);
+    
     setIsShaking(true);
     setTimeout(() => setIsShaking(false), 400);
     
-    // C╞í chß║┐ Quizlet: ─Éß║⌐y c├óu sai sang Round kß║┐ tiß║┐p
     setRounds(prev => {
       const newRounds = [...prev];
-      // X├│a tß╗½ n├áy khß╗Åi round hiß╗çn tß║íi ─æß╗â v├▓ng tß╗▒ luß║¡n (typing) ph├¡a sau kh├┤ng hß╗Åi lß║íi
       newRounds[currentRoundIndex] = newRounds[currentRoundIndex].filter(w => w.id !== currentWord.id);
-      
-      // ─Éß║⌐y v├áo round kß║┐ tiß║┐p (hoß║╖c tß║ío round mß╗¢i nß║┐u ─æang ß╗ƒ round cuß╗æi c├╣ng)
       if (currentRoundIndex < newRounds.length - 1) {
         newRounds[currentRoundIndex + 1] = [...newRounds[currentRoundIndex + 1], currentWord];
       } else {
@@ -340,11 +326,11 @@ function LearnMode() {
     });
     
     setFeedback({ isCorrect: false, correctAnswer: correctAnswerText, yourAnswer: userAnsText });
-    playAudio(correctAnswerText, 'error', currentWord.language === 'en');
+    playAudio(correctAnswerText, 'error');
   };
 
   const handleCorrectAnswer = (currentWord) => {
-    playSound('correct'); // Tiß║┐ng ting ─æ├║ng
+    playSound('correct');
     vibrate(40);
     const newStreak = streak + 1;
     setStreak(newStreak);
@@ -439,9 +425,15 @@ function LearnMode() {
             />
           </div>
 
-          <button className="btn btn-primary btn-lg w-100 fw-bold shadow-lg" style={{ borderRadius: '14px', padding: '15px', backgroundColor: '#8a2be2', border: 'none' }} onClick={handleStart}>
+          <motion.button 
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.96 }}
+            className="btn btn-primary btn-lg w-100 fw-bold shadow-lg text-white" 
+            style={{ borderRadius: '14px', padding: '15px', backgroundColor: '#8a2be2', border: 'none' }} 
+            onClick={handleStart}
+          >
             Bắt đầu vắt óc 🧠
-          </button>
+          </motion.button>
         </div>
       </div>
     );
@@ -454,144 +446,273 @@ function LearnMode() {
   const progressPercent = Math.round(((currentRoundIndex + modeOffset + wordProgress) / rounds.length) * 100) || 0;
 
   return (
-    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''} ${isShaking ? 'screen-flash-error' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : { minHeight: '100vh' }}>
-      
-      {!isFinished && (
-        <div className="sticky-top bg-white py-2 z-3 shadow-sm mb-4 rounded-bottom-4 px-3" style={{ top: 0, margin: '-1.5rem -0.75rem 0', transition: 'all 0.3s ease' }}>
-          <div className="mx-auto d-flex justify-content-between align-items-center mb-2" style={{ maxWidth: '650px', width: '100%' }}>
-            <button className="btn btn-light rounded-circle shadow-sm border-0 d-print-none hover-bg-light transition-all tap-effect" onClick={toggleFullscreen} title="Toàn màn hình (F)">
-              {isFullscreen ? '↙️' : '⛶'}
-            </button>
-            <div className="d-flex align-items-center gap-3 fw-bold text-muted">
-              {streak > 0 && (
-                <div key={streak} className="streak-indicator d-flex align-items-center bg-white rounded-pill shadow-sm border overflow-hidden streak-pop" style={{ height: '38px', borderColor: streak >= 5 ? '#dc3545' : '#ffc107' }}>
-                  <div className={`px-3 h-100 d-flex align-items-center fw-bold fs-6 text-white ${streak >= 5 ? 'bg-danger streak-glow' : 'bg-warning text-dark'}`}>
-                    🔥 {streak}
-                  </div>
-                  <div className="d-flex align-items-center gap-1 px-2" style={{ width: '70px' }}>
-                    {[...Array(5)].map((_, i) => {
-                      const isActive = i < (streak > 0 ? ((streak - 1) % 5) + 1 : 0);
-                      return (
-                        <div 
-                          key={i} 
-                          className={`rounded-pill ${isActive ? (streak >= 5 ? 'bg-danger' : 'bg-warning') : 'bg-light'}`} 
-                          style={{ height: '6px', flexGrow: 1, transition: 'all 0.3s ease', transform: isActive ? 'scaleY(1.5)' : 'scaleY(1)' }}
-                        ></div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              <span className="fs-5 text-primary">{progressPercent}%</span>
-            </div>
-          </div>
-          <div className="progress mx-auto shadow-sm" style={{ height: '12px', borderRadius: '10px', maxWidth: '650px', backgroundColor: '#f0f0f0' }}>
-            <div className="progress-bar" role="progressbar" style={{ width: `${progressPercent}%`, transition: 'width 0.4s ease', backgroundColor: '#8a2be2', position: 'relative', overflow: 'hidden' }}>
-              <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0, background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)', animation: 'progressGlow 2s infinite linear' }}></div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="mx-auto mt-4" style={{ maxWidth: '650px', width: '100%' }}>
+    <div className={`container-fluid py-4 transition-all ${isFullscreen ? 'bg-light mobile-fullscreen pt-4' : ''}`} ref={containerRef} style={isFullscreen ? { minHeight: '100vh', overflowY: 'auto' } : {}}>
+      <div className="mx-auto" style={{ maxWidth: '650px', width: '100%' }}>
         
-        {isFinished ? (
-          <div className="card shadow-lg border-0 p-5 rounded-4 fade-in-slide mx-auto bg-white">
-            <div className="display-1 mb-3 text-center">🏆</div>
-            <h2 className="fw-bold text-success mb-3 text-center">Bài học hoàn tất!</h2>
-            <p className="fs-5 text-muted mb-4 text-center">Bạn vừa hoàn thành một phiên vắt óc rất chất lượng.</p>
-            
-            <div className="row g-3 mb-5">
-              <div className="col-6">
-                <div className="bg-light p-4 rounded-4 h-100 border border-warning text-center" style={{ borderWidth: '2px !important' }}>
-                  <h2 className="fw-bold text-warning mb-0">🔥 {maxStreak}</h2>
-                  <span className="fw-bold text-muted small">CHUỖI DÀI NHẤT</span>
-                </div>
-              </div>
-              <div className="col-6">
-                <div className="bg-light p-4 rounded-4 h-100 border text-center" style={{ borderColor: '#8a2be2', borderWidth: '2px !important' }}>
-                  <h2 className="fw-bold mb-0" style={{ color: '#8a2be2' }}>⚡ {rounds.flat().length * 10}</h2>
-                  <span className="fw-bold text-muted small">ĐIỂM KINH NGHIỆM</span>
-                </div>
+        {!isFinished && (
+          <div className="mb-4">
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <button className="btn btn-white rounded-circle shadow-sm border bg-white text-muted hover-scale transition-all" style={{ width: '42px', height: '42px' }} onClick={toggleFullscreen} title="Toàn màn hình (F)">
+                {isFullscreen ? '↙️' : '⛶'}
+              </button>
+              
+              {/* NÂNG CẤP THANH STREAK */}
+              <div className="d-flex align-items-center gap-3 fw-bold text-muted">
+                <AnimatePresence>
+                  {streak > 0 && (
+                    <motion.div 
+                      key={`streak-${streak}`}
+                      initial={{ scale: 0.8, opacity: 0, y: 10 }}
+                      animate={{ scale: 1, opacity: 1, y: 0 }}
+                      exit={{ scale: 0.5, opacity: 0 }}
+                      transition={{ type: "spring", stiffness: 500, damping: 20 }}
+                      className="d-flex align-items-center bg-white rounded-pill shadow-sm overflow-hidden border" 
+                      style={{ 
+                        height: '40px',
+                        borderColor: streak >= 5 ? '#ff4757' : '#ffa502',
+                        boxShadow: streak >= 5 ? '0 4px 15px rgba(255, 71, 87, 0.3)' : '0 2px 8px rgba(0,0,0,0.05)'
+                      }}
+                    >
+                      <div className="px-3 h-100 d-flex align-items-center fw-black fs-6 text-white" 
+                           style={{ background: streak >= 5 ? 'linear-gradient(135deg, #ff6b81, #ff4757)' : 'linear-gradient(135deg, #feca57, #ff9f43)' }}>
+                        <motion.span 
+                           animate={streak >= 5 ? { scale: [1, 1.3, 1], rotate: [0, 15, -15, 0] } : {}} 
+                           transition={{ repeat: Infinity, duration: 1.2 }}
+                        >
+                          🔥
+                        </motion.span> 
+                        <span className="ms-1">{streak}</span>
+                      </div>
+                      <div className="d-flex align-items-center gap-1 px-2" style={{ width: '70px' }}>
+                        {[...Array(5)].map((_, i) => {
+                          const isActive = i < (streak > 0 ? ((streak - 1) % 5) + 1 : 0);
+                          return (
+                            <motion.div 
+                              key={i} 
+                              initial={false}
+                              animate={{ 
+                                scaleY: isActive ? 1.6 : 1, 
+                                backgroundColor: isActive ? (streak >= 5 ? '#ff4757' : '#ffa502') : '#f1f2f6'
+                              }}
+                              transition={{ duration: 0.2 }}
+                              className="rounded-pill" 
+                              style={{ height: '6px', flexGrow: 1 }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                <span className="fs-5" style={{ color: '#8a2be2' }}>{progressPercent}%</span>
               </div>
             </div>
-            <button className="btn btn-lg fw-bold w-100 shadow-sm text-white hover-scale tap-effect" style={{ backgroundColor: '#8a2be2' }} onClick={handleExit}>Hoàn thành & Quay lại</button>
-          </div>
-        ) : (
-          <div className={`card shadow-sm border-0 rounded-4 fade-in-slide ${isShaking ? 'shake border border-danger' : ''}`} key={`${currentRoundIndex}-${currentWordIndex}-${mode}-${feedback ? 'fb' : 'q'}`}>
-            <div className="card-body p-4 p-md-5">
-              {feedback ? (
-                <div className="text-center correct-answer-pop">
-                  <div className="mb-3">
-                    <span style={{ fontSize: '4rem' }}>😢</span>
-                  </div>
-                  <h4 className="text-danger fw-bold mb-4">Ối! Sai mất rồi.</h4>
-                  <div className="p-4 mb-4 rounded-4 text-start shadow-sm position-relative overflow-hidden" style={{ backgroundColor: '#fff0f0', border: '2px solid #ffcaca' }}>
-                    <div className="position-absolute" style={{ top: '-20px', right: '-20px', fontSize: '6rem', opacity: 0.1 }}>❌</div>
-                    <p className="mb-2 text-muted fw-bold">KHI HỎI VỀ:</p>
-                    <p className="fs-3 fw-bold mb-4" style={{ color: '#8a2be2' }}>{questionText}</p>
-                    <hr style={{ borderColor: '#ffcaca' }} />
-                    <p className="text-muted mb-2 fw-bold">BẠN ĐÃ CHỌN/GÕ:</p>
-                    <p className="text-danger text-decoration-line-through fs-5 mb-4">{feedback.yourAnswer}</p>
-                    <p className="text-success mb-1 fw-bold">ĐÁP ÁN ĐÚNG PHẢI LÀ:</p>
-                    <div className="d-flex align-items-center bg-white p-3 rounded-3 shadow-sm border border-success">
-                      <span className="fs-3 fw-bold text-success me-3">✓</span>
-                      <span className="fs-3 fw-bold text-dark flex-grow-1">{feedback.correctAnswer}</span>
-                      <button className="btn btn-light rounded-circle shadow-sm border transition-all hover-bg-light tap-effect" onClick={() => playAudio(feedback.correctAnswer, 'normal', currentWord?.language === 'en')} title="Nghe lại" style={{ width: '45px', height: '45px' }}>🔊</button>
-                    </div>
-                  </div>
-                  <button className="btn btn-primary btn-lg fw-bold w-100 mt-2 shadow-sm text-white hover-scale tap-effect" style={{ backgroundColor: '#8a2be2', padding: '15px' }} onClick={handleNextAfterFeedback} autoFocus>Đã hiểu, tiếp tục thôi!</button>
-                </div>
-              ) : (
-                <div className="text-center">
-                  <span className="badge bg-light text-muted border mb-3 fw-bold px-3 py-2 fs-6 shadow-sm">
-                    {mode === 'choice' ? 'Chọn đáp án đúng' : 'Gõ đáp án chính xác'}
-                  </span>
-                  
-                  <div className="d-flex justify-content-center align-items-center gap-3 mb-4">
-                    <h3 className="text-dark fw-bold m-0" style={{ fontSize: '2.5rem' }}>{questionText}</h3>
-                    <button className="btn btn-light rounded-circle shadow-sm transition-all hover-bg-light tap-effect" onClick={() => playAudio(questionText, 'normal', currentWord?.language === 'en')} title="Phát âm">🔊</button>
-                  </div>
-                  
-                  {mode === 'choice' ? (
-                    <div className="d-flex flex-column gap-3 mt-4">
-                      {options.map((opt, i) => (
-                        <button 
-                          key={opt.id} 
-                          className="btn btn-light border py-3 text-start px-4 fs-5 fw-bold hover-bg-light transition-all d-flex align-items-center shadow-sm tap-effect" 
-                          style={{ borderRadius: '12px' }}
-                          onClick={() => handleChoiceSubmit(opt)}
-                        >
-                          <span className="badge bg-secondary me-3" style={{ opacity: 0.6 }}>{i + 1}</span>
-                          {getAnswerText(opt)}
-                        </button>
-                      ))}
-                      <div className="mt-3 text-end">
-                        <button className="btn btn-link text-muted fw-bold text-decoration-none border-0 hover-scale tap-effect" onClick={handleDontKnow}>Tôi không biết câu này 🤷‍♂️</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <form onSubmit={handleTypeSubmit} className="mt-4">
-                      <div className="position-relative mb-4">
-                        <input 
-                          type="text" 
-                          className="form-control form-control-lg text-center py-4 bg-light fw-bold shadow-sm" 
-                          placeholder={`Nhập ${getBackLabel().toLowerCase()} vào đây...`}
-                          value={inputText} onChange={(e) => setInputText(e.target.value)} autoComplete="off" autoFocus
-                          style={{ fontSize: '1.5rem', borderRadius: '16px', border: '2px solid #dee2e6' }}
-                        />
-                      </div>
-                      <div className="d-flex gap-3">
-                        <button type="button" className="btn btn-outline-secondary w-50 py-3 fs-5 fw-bold border hover-bg-light shadow-sm rounded-4 tap-effect" onClick={handleDontKnow}>Bỏ qua</button>
-                        <button type="submit" className="btn w-50 py-3 fs-5 fw-bold shadow-sm rounded-4 text-white hover-scale tap-effect" style={{ backgroundColor: '#8a2be2' }}>Kiểm tra</button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              )}
+
+            {/* NÂNG CẤP THANH PROGRESS */}
+            <div className="progress shadow-sm overflow-hidden" style={{ height: '10px', borderRadius: '10px', backgroundColor: '#f1f2f6' }}>
+              <motion.div 
+                className="progress-bar" 
+                role="progressbar" 
+                initial={{ width: 0 }}
+                animate={{ width: `${progressPercent}%` }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                style={{ backgroundColor: '#8a2be2', backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.15) 75%, transparent 75%, transparent)', backgroundSize: '1rem 1rem' }}
+              />
             </div>
           </div>
         )}
+        
+        <AnimatePresence mode="wait">
+          {isFinished ? (
+            <motion.div 
+              key="finished"
+              initial={{ scale: 0.8, opacity: 0, y: 50 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 300, damping: 20 }}
+              className="card shadow-lg border-0 p-5 rounded-4 mx-auto bg-white text-center"
+            >
+              <motion.div 
+                initial={{ scale: 0 }} 
+                animate={{ scale: 1, rotate: [0, -10, 10, -10, 0] }} 
+                transition={{ delay: 0.2, type: "spring" }}
+                className="display-1 mb-3"
+              >🏆</motion.div>
+              <h2 className="fw-bold text-success mb-3">Bài học hoàn tất!</h2>
+              <p className="fs-5 text-muted mb-4">Bạn vừa hoàn thành một phiên vắt óc rất chất lượng.</p>
+              
+              <div className="row g-3 mb-5">
+                <div className="col-6">
+                  <div className="bg-light p-4 rounded-4 h-100 border text-center" style={{ borderColor: '#ff9f43', borderWidth: '2px !important' }}>
+                    <h2 className="fw-bold mb-0" style={{ color: '#ff9f43' }}>🔥 {maxStreak}</h2>
+                    <span className="fw-bold text-muted small">CHUỖI DÀI NHẤT</span>
+                  </div>
+                </div>
+                <div className="col-6">
+                  <div className="bg-light p-4 rounded-4 h-100 border text-center" style={{ borderColor: '#8a2be2', borderWidth: '2px !important' }}>
+                    <h2 className="fw-bold mb-0" style={{ color: '#8a2be2' }}>⚡ {rounds.flat().length * 10}</h2>
+                    <span className="fw-bold text-muted small">ĐIỂM KINH NGHIỆM</span>
+                  </div>
+                </div>
+              </div>
+              <motion.button 
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.95 }}
+                className="btn btn-lg fw-bold w-100 shadow-sm text-white" 
+                style={{ backgroundColor: '#8a2be2' }} 
+                onClick={handleExit}
+              >
+                Hoàn thành & Quay lại
+              </motion.button>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="playing-card"
+              initial={{ opacity: 0, y: 20 }}
+              animate={isShaking ? { x: [-10, 10, -10, 10, 0], transition: { duration: 0.4 } } : { opacity: 1, x: 0, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+              className="card shadow-sm border-0 rounded-4 bg-white"
+            >
+              <div className="card-body p-4 p-md-5">
+                {feedback ? (
+                  <div className="text-center">
+                    <motion.h5 
+                      initial={{ y: -10, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      className="text-danger fw-bold mb-4 d-flex justify-content-center align-items-center gap-2"
+                    >
+                      <span style={{ fontSize: '1.4rem' }}>❌</span> Chưa chính xác! Từ này sẽ được hỏi lại.
+                    </motion.h5>
+                    
+                    <motion.div 
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      transition={{ delay: 0.1 }}
+                      className="p-4 mb-4 bg-light rounded-4 text-start shadow-sm" 
+                      style={{ borderLeft: '5px solid #ff4757' }}
+                    >
+                      <p className="mb-2"><strong>Câu hỏi:</strong> <span className="fs-5 fw-bold" style={{ color: '#8a2be2' }}>{questionText}</span></p>
+                      <p className="text-muted mb-3"><strong>Bạn chọn/gõ:</strong> <span className="text-decoration-line-through">{feedback.yourAnswer}</span></p>
+                      <p className="text-success fs-4 mb-0 fw-black d-flex align-items-center">
+                        <span className="me-2">✓</span> {feedback.correctAnswer}
+                        <motion.button 
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
+                          className="btn btn-sm btn-white rounded-circle ms-3 shadow-sm border d-flex align-items-center justify-content-center" 
+                          onClick={() => playAudio(feedback.correctAnswer)} 
+                          title="Nghe lại"
+                          style={{ width: '36px', height: '36px', backgroundColor: 'white' }}
+                        >
+                          🔊
+                        </motion.button>
+                      </p>
+                    </motion.div>
+                    
+                    <motion.button 
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="btn btn-primary btn-lg fw-bold w-100 mt-2 shadow-sm text-white" 
+                      style={{ backgroundColor: '#8a2be2', borderRadius: '14px', border: 'none' }} 
+                      onClick={handleNextAfterFeedback} 
+                      autoFocus
+                    >
+                      Đã hiểu, tiếp tục
+                    </motion.button>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <span className="badge bg-light text-muted border mb-4 fw-bold px-3 py-2 fs-6 shadow-sm rounded-pill">
+                      {mode === 'choice' ? '👆 Chọn đáp án đúng' : '⌨️ Gõ đáp án chính xác'}
+                    </span>
+                    
+                    <div className="d-flex justify-content-center align-items-center gap-3 mb-4">
+                      <motion.h3 
+                        key={questionText}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-dark fw-bold m-0" 
+                        style={{ fontSize: '2.5rem' }}
+                      >
+                        {questionText}
+                      </motion.h3>
+                      <motion.button 
+                        whileHover={{ scale: 1.1, backgroundColor: '#f1f2f6' }}
+                        whileTap={{ scale: 0.9 }}
+                        className="btn btn-white rounded-circle shadow-sm border d-flex align-items-center justify-content-center" 
+                        onClick={() => playAudio(questionText)} 
+                        title="Phát âm"
+                        style={{ width: '46px', height: '46px' }}
+                      >
+                        🔊
+                      </motion.button>
+                    </div>
+                    
+                    {mode === 'choice' ? (
+                      <div className="d-flex flex-column gap-3 mt-4">
+                        {options.map((opt, i) => (
+                          <motion.button 
+                            key={opt.id} 
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: i * 0.05, type: 'spring', stiffness: 300 }}
+                            whileHover={{ scale: 1.01, backgroundColor: '#f8f9fa', borderColor: '#ced4da' }}
+                            whileTap={{ scale: 0.98 }}
+                            className="btn btn-white border py-3 text-start px-4 fs-5 fw-bold transition-all d-flex align-items-center shadow-sm" 
+                            style={{ borderRadius: '14px', color: '#2f3542', backgroundColor: 'white' }}
+                            onClick={() => handleChoiceSubmit(opt)}
+                          >
+                            <span className="badge me-3 d-flex align-items-center justify-content-center" style={{ width: '32px', height: '32px', backgroundColor: '#f1f2f6', color: '#57606f', borderRadius: '10px' }}>
+                              {i + 1}
+                            </span>
+                            <span className="flex-grow-1 text-wrap">{getAnswerText(opt)}</span>
+                          </motion.button>
+                        ))}
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="mt-3 text-end">
+                          <button className="btn btn-link text-muted fw-bold text-decoration-none border-0" onClick={handleDontKnow}>Tôi không biết câu này 🤷‍♂️</button>
+                        </motion.div>
+                      </div>
+                    ) : (
+                      <motion.form 
+                        initial={{ opacity: 0, y: 15 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onSubmit={handleTypeSubmit} 
+                        className="mt-4"
+                      >
+                        <div className="position-relative mb-4">
+                          <input 
+                            type="text" 
+                            className="form-control form-control-lg text-center py-4 bg-light fw-bold shadow-sm" 
+                            placeholder={`Nhập ${getBackLabel().toLowerCase()} vào đây...`}
+                            value={inputText} onChange={(e) => setInputText(e.target.value)} autoComplete="off" autoFocus
+                            style={{ fontSize: '1.5rem', borderRadius: '16px', border: '2px solid #dee2e6' }}
+                          />
+                        </div>
+                        <div className="d-flex gap-3">
+                          <motion.button 
+                            whileTap={{ scale: 0.95 }}
+                            type="button" 
+                            className="btn btn-white w-50 py-3 fs-5 fw-bold border shadow-sm rounded-4 text-muted" 
+                            onClick={handleDontKnow}
+                          >
+                            Bỏ qua
+                          </motion.button>
+                          <motion.button 
+                            whileTap={{ scale: 0.95 }}
+                            type="submit" 
+                            className="btn w-50 py-3 fs-5 fw-bold shadow-sm rounded-4 text-white" 
+                            style={{ backgroundColor: '#8a2be2' }}
+                          >
+                            Kiểm tra
+                          </motion.button>
+                        </div>
+                      </motion.form>
+                    )}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

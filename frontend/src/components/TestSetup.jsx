@@ -5,33 +5,24 @@ import GameModeSelector from './GameModeSelector';
 
 function TestSetup({ sets, currentContentType, selectedSetId, setSelectedSetId, questionCount, setQuestionCount, poolSize, questionFormat, setQuestionFormat, isReversed, setIsReversed, kanjiFront, setKanjiFront, kanjiBack, setKanjiBack, generateTest }) {
   
-  let hasFourFields = false;
-  if (currentContentType === 'kanji') {
-    hasFourFields = true;
-  } else {
-    if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') {
-      hasFourFields = true;
-    } else if (!String(selectedSetId).startsWith('lang_en') && !String(selectedSetId).startsWith('lang_kanji') && !String(selectedSetId).startsWith('all_')) {
-      if (String(selectedSetId).startsWith('folder_')) {
-         const folderName = String(selectedSetId).substring(7);
-         const targetSets = sets.filter(s => (s.folder_path || '🏠 Thư mục gốc') === folderName);
-         hasFourFields = targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
-      } else {
-        const s = sets.find(set => set.id == selectedSetId);
-        if (s && s.vocabularies) {
-          hasFourFields = s.vocabularies.some(v => v.hanviet || v.hiragana);
-        }
-      }
+  const hasFourFields = (() => {
+    if (currentContentType === 'kanji') return true;
+    if (String(selectedSetId).includes('ja') || String(selectedSetId).includes('kanji')) return true;
+    
+    let targetSets = [];
+    if (String(selectedSetId).startsWith('folder_')) {
+      const folderName = String(selectedSetId).substring(7);
+      targetSets = sets.filter(s => (s.folder_path || '🏠 Thư mục gốc') === folderName);
+    } else {
+      const s = sets.find(set => set.id == selectedSetId);
+      if (s) targetSets = [s];
     }
-  }
 
-  const getFrontLabel = () => {
-    return isReversed ? 'Ý nghĩa' : 'Từ vựng';
-  };
-  
-  const getBackLabel = () => {
-    return isReversed ? 'Từ vựng' : 'Ý nghĩa';
-  };
+    if (targetSets.length > 0) {
+      return targetSets.some(s => s.language === 'ja' || s.type === 'kanji' || (s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana)));
+    }
+    return false;
+  })();
 
   const handleSwap = () => {
     if (hasFourFields) {
@@ -44,7 +35,8 @@ function TestSetup({ sets, currentContentType, selectedSetId, setSelectedSetId, 
 
   return (
     <div className="container mt-5 fade-in-slide" style={{ maxWidth: '650px' }}>
-      <div className="card shadow-sm border-0 p-4 p-md-5 rounded-4 bg-white" style={{ borderRadius: '24px' }}>
+      {/* Đã giảm padding p-4 thành p-3 trên mobile để tiết kiệm diện tích */}
+      <div className="card shadow-sm border-0 p-3 p-md-5 rounded-4 bg-white" style={{ borderRadius: '24px' }}>
         <h3 className="text-center mb-5 fw-bold text-dark">Thiết lập Bài Thi</h3>
         
         <div className="mb-4">
@@ -53,7 +45,8 @@ function TestSetup({ sets, currentContentType, selectedSetId, setSelectedSetId, 
         </div>
 
         <div className="row g-3 mb-4">
-          <div className="col-6">
+          {/* Đổi từ col-6 thành col-12 col-md-6 để hiển thị dọc trên mobile */}
+          <div className="col-12 col-md-6">
             <label className="form-label fw-bold text-muted">Số lượng câu hỏi:</label>
             <input 
               type="number" 
@@ -66,7 +59,7 @@ function TestSetup({ sets, currentContentType, selectedSetId, setSelectedSetId, 
             />
             <small className="text-muted d-block mt-1">Tối đa {poolSize} câu.</small>
           </div>
-          <div className="col-6">
+          <div className="col-12 col-md-6">
             <label className="form-label fw-bold text-muted">Hình thức thi:</label>
             <select 
               className="form-select form-select-lg bg-light border-0 fw-bold text-dark shadow-sm" 
@@ -96,41 +89,25 @@ function TestSetup({ sets, currentContentType, selectedSetId, setSelectedSetId, 
               presets={[
                 {
                   id: 'jlpt-meaning', icon: '🧠', iconBg: '#ede9fe', label: 'Dạng bài JLPT (Ý nghĩa)',
-                  getDesc: (f, b, type) => {
-                    const fLabel = f === 'meaning' ? 'Ý nghĩa' : 'Từ/Hán tự';
-                    const bLabel = b === 'meaning' ? 'Ý nghĩa' : 'Từ/Hán tự';
-                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
-                  },
+                  getDesc: (f, b, type) => { const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng'; return f === 'meaning' && (b === 'word' || b === 'kanji') ? `Nhìn Ý nghĩa ➔ Trả lời ${w}` : `Nhìn ${w} ➔ Trả lời Ý nghĩa`; },
                   frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'meaning',
                   isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'meaning') || (f === 'meaning' && b === w); }
                 },
                 {
                   id: 'jlpt-reading', icon: '🗣️', iconBg: '#fef3c7', label: 'Dạng bài JLPT (Cách đọc)',
-                  getDesc: (f, b) => {
-                    const fLabel = f === 'hiragana' ? 'Phiên âm' : 'Từ/Hán tự';
-                    const bLabel = b === 'hiragana' ? 'Phiên âm' : 'Từ/Hán tự';
-                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
-                  },
+                  getDesc: (f, b, type) => { const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng'; return f === 'hiragana' && (b === 'word' || b === 'kanji') ? `Nhìn Phiên âm ➔ Trả lời ${w}` : `Nhìn ${w} ➔ Trả lời Phiên âm`; },
                   frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'hiragana',
                   isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'hiragana') || (f === 'hiragana' && b === w); }
                 },
                 {
                   id: 'hanviet', icon: '👑', iconBg: '#fee2e2', label: 'Vua Hán Tự',
-                  getDesc: (f, b) => {
-                    const fLabel = f === 'meaning' ? 'Ý nghĩa' : 'Hán Việt';
-                    const bLabel = b === 'meaning' ? 'Ý nghĩa' : 'Hán Việt';
-                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
-                  },
+                  getDesc: (f, b) => f === 'meaning' && b === 'hanviet' ? 'Nhìn Ý nghĩa ➔ Trả lời Hán Việt' : 'Nhìn Hán Việt ➔ Trả lời Ý nghĩa',
                   frontKey: () => 'hanviet', backKey: () => 'meaning',
                   isActive: (f, b) => (f === 'hanviet' && b === 'meaning') || (f === 'meaning' && b === 'hanviet')
                 },
                 {
                   id: 'listening', icon: '🎧', iconBg: '#dbeafe', label: 'Nghe Hiểu / Từ vựng',
-                  getDesc: (f, b) => {
-                    const fLabel = f === 'meaning' ? 'Ý nghĩa' : 'Phiên âm';
-                    const bLabel = b === 'meaning' ? 'Ý nghĩa' : 'Phiên âm';
-                    return `Nhìn ${fLabel} ➔ Trả lời ${bLabel}`;
-                  },
+                  getDesc: (f, b) => f === 'meaning' && b === 'hiragana' ? 'Nhìn Ý nghĩa ➔ Trả lời Phiên âm' : 'Nhìn Phiên âm ➔ Trả lời Ý nghĩa',
                   frontKey: () => 'hiragana', backKey: () => 'meaning',
                   isActive: (f, b) => (f === 'hiragana' && b === 'meaning') || (f === 'meaning' && b === 'hiragana')
                 }

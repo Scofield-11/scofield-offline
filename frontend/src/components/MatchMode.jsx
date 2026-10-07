@@ -3,8 +3,10 @@ import { VocabContext } from '../context/VocabContext';
 import { toast } from 'react-toastify';
 import LoadingSkeleton from './LoadingSkeleton';
 import confetti from 'canvas-confetti';
+import api from '../api/axiosConfig';
 import SetSelector from './SetSelector';
 import GameModeSelector from './GameModeSelector';
+import { motion, AnimatePresence } from 'framer-motion';
 
 function MatchMode() {
   const { sets, setSets, loading, fetchSets } = useContext(VocabContext);
@@ -32,6 +34,7 @@ function MatchMode() {
   const [gameMode, setGameMode] = useState('normal'); 
   const [kanjiMatchA, setKanjiMatchA] = useState('kanji');
   const [kanjiMatchB, setKanjiMatchB] = useState('meaning');
+  const [isReversed, setIsReversed] = useState(false);
   
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
@@ -60,12 +63,26 @@ function MatchMode() {
   const [isAnimating, setIsAnimating] = useState(false); 
   const [timeElapsed, setTimeElapsed] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
+  const [isWrongMatch, setIsWrongMatch] = useState(false);
 
   const vibrate = (pattern) => { if (navigator.vibrate) navigator.vibrate(pattern); };
 
+  const hasFourFields = (() => {
+    if (currentContentType === 'kanji') return true;
+    if (String(selectedSetId).includes('ja') || String(selectedSetId).includes('kanji')) return true;
+    if (targetSets.length > 0) {
+      return targetSets.some(s => s.language === 'ja' || s.type === 'kanji' || (s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana)));
+    }
+    return false;
+  })();
+
   const handleSwap = () => {
-    setKanjiMatchA(kanjiMatchB);
-    setKanjiMatchB(kanjiMatchA);
+    if (hasFourFields) {
+      setKanjiMatchA(kanjiMatchB);
+      setKanjiMatchB(kanjiMatchA);
+    } else {
+      setIsReversed(!isReversed);
+    }
   };
 
   const toggleFullscreen = () => {
@@ -77,7 +94,7 @@ function MatchMode() {
         elem.webkitRequestFullscreen();
         setIsFullscreen(true);
       } else {
-        setIsFullscreen(true); // Fallback CSS
+        setIsFullscreen(true); 
       }
     } else {
       if (document.fullscreenElement && document.exitFullscreen) {
@@ -146,30 +163,20 @@ function MatchMode() {
     }
   }, [isFinished, gameMode, score, highScore, selectedSetId, currentContentType]);
 
-
-
   const getCardTexts = (vocab) => {
-    const hasFourFields = (() => {
-      if (currentContentType === 'kanji') return true;
-      if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
-      if (targetSets.length > 0) {
-        return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
-      }
-      return false;
-    })();
-
-    let faceA = currentContentType === 'kanji' ? kanjiMatchA : (hasFourFields ? (kanjiMatchA === 'kanji' ? 'word' : kanjiMatchA) : 'word');
-    let faceB = currentContentType === 'kanji' ? kanjiMatchB : (hasFourFields ? (kanjiMatchB === 'meaning' && kanjiMatchA === 'kanji' ? 'meaning' : (kanjiMatchB === 'kanji' ? 'word' : kanjiMatchB)) : 'meaning');
+    let faceA = currentContentType === 'kanji' ? kanjiMatchA : (hasFourFields ? (kanjiMatchA === 'kanji' ? 'word' : kanjiMatchA) : (isReversed ? 'meaning' : 'word'));
+    let faceB = currentContentType === 'kanji' ? kanjiMatchB : (hasFourFields ? (kanjiMatchB === 'meaning' && kanjiMatchA === 'kanji' ? 'meaning' : (kanjiMatchB === 'kanji' ? 'word' : kanjiMatchB)) : (isReversed ? 'word' : 'meaning'));
     if (!vocab[faceA] && (faceA === 'hanviet' || faceA === 'hiragana')) faceA = 'word';
     if (!vocab[faceB] && (faceB === 'hanviet' || faceB === 'hiragana')) faceB = 'meaning';
     
     return [vocab[faceA] || "", vocab[faceB] || ""];
   };
 
-
-
   const generateCards = async () => {
-    if (targetSets.length === 0) return toast.warning("Không có học phần nào phù hợp!");
+    if (targetSets.length === 0) {
+      toast.warning("Không có học phần nào phù hợp!");
+      return false;
+    }
 
     const fullSets = await Promise.all(targetSets.map(async (s) => {
       if (s.vocabularies && s.vocabularies.length > 0) return s;
@@ -182,9 +189,14 @@ function MatchMode() {
     setSets(prev => prev.map(p => fullSets.find(fs => fs.id === p.id) || p));
     const pool = fullSets.flatMap(s => s.vocabularies || []);
 
+    if (pool.length < 2) {
+      toast.warning(`Học phần này cần ít nhất 2 thẻ (từ vựng) để chơi ghép thẻ!`);
+      return false;
+    }
+
     const actualDifficulty = Math.min(difficulty, pool.length);
     const pivotIndex = Math.floor(Math.random() * pool.length);
-    const pivotWord = pool[pivotIndex] || pool[0];
+    const pivotWord = pool[pivotIndex];
     
     const scoredPool = pool.map(v => {
       let sc = v.id === pivotWord.id ? 999 : 0;
@@ -204,14 +216,13 @@ function MatchMode() {
     });
     setCards(initialCards.sort(() => 0.5 - Math.random()));
     setMatchedIds([]);
+    return true;
   };
 
   const startGame = async () => {
-    const poolLength = targetSets.reduce((sum, s) => sum + (s.vocab_count || 0), 0);
+    const success = await generateCards();
+    if (!success) return;
 
-    if (poolLength < 2) return toast.warning(`Cần ít nhất 2 thẻ để chơi!`);
-
-    await generateCards();
     setSelectedCards([]);
     setErrorCards([]);
     setSuccessCards([]);
@@ -252,9 +263,12 @@ function MatchMode() {
           setIsAnimating(false); 
         }, 500);
       } else {
-        vibrate([100, 50, 100]);
+        vibrate([200, 100, 200]);
         setCombo(0); 
         setErrorCards([newSelected[0].id, newSelected[1].id]);
+        setIsWrongMatch(true); // Kích hoạt chớp đỏ màn hình
+        setTimeout(() => setIsWrongMatch(false), 400);
+
         setTimeout(() => {
           setSelectedCards([]);
           setErrorCards([]);
@@ -269,7 +283,7 @@ function MatchMode() {
   if (!isStarted) {
     return (
       <div className="container mt-5 fade-in-slide" style={{ maxWidth: '500px' }}>
-        <div className="card shadow-sm border-0 p-4 rounded-4">
+        <div className="card shadow-sm border-0 p-4 rounded-4 bg-white">
           <h3 className="text-center mb-4 fw-bold">Game Ghép Thẻ</h3>
           <div className="mb-3">
             <label className="form-label fw-bold text-muted">Chế độ chơi:</label>
@@ -286,53 +300,50 @@ function MatchMode() {
             />
           </div>
 
-          {((() => {
-              if (currentContentType === 'kanji') return true;
-              if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
-              if (targetSets.length > 0) {
-                return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
-              }
-              return false;
-          })()) && (
-            <div className="mb-4">
-              <GameModeSelector
-                hasFourFields={true}
-                currentContentType={currentContentType}
-                kanjiFront={kanjiMatchA}
-                setKanjiFront={setKanjiMatchA}
-                kanjiBack={kanjiMatchB}
-                setKanjiBack={setKanjiMatchB}
-                onSwap={handleSwap}
-                sectionLabel="Luật chơi (Game Rules)"
-                presets={[
-                  {
-                    id: 'classic', icon: '🏛️', iconBg: '#ede9fe', label: 'Cổ điển',
-                    getDesc: (f, b) => f === 'meaning' ? 'Ý nghĩa ↔ Từ/Hán tự' : 'Từ/Hán tự ↔ Ý nghĩa',
-                    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'meaning',
-                    isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'meaning') || (f === 'meaning' && b === w); }
-                  },
-                  {
-                    id: 'speed', icon: '⚡', iconBg: '#fef3c7', label: 'Đua Tốc Độ',
-                    getDesc: (f, b) => f === 'hiragana' ? 'Phiên âm ↔ Từ/Hán tự' : 'Từ/Hán tự ↔ Phiên âm',
-                    frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'hiragana',
-                    isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'hiragana') || (f === 'hiragana' && b === w); }
-                  },
-                  {
-                    id: 'hanviet', icon: '👑', iconBg: '#fee2e2', label: 'Vua Hán Tự',
-                    getDesc: (f, b) => f === 'meaning' ? 'Ý nghĩa ↔ Hán Việt' : 'Hán Việt ↔ Ý nghĩa',
-                    frontKey: () => 'hanviet', backKey: () => 'meaning',
-                    isActive: (f, b) => (f === 'hanviet' && b === 'meaning') || (f === 'meaning' && b === 'hanviet')
-                  },
-                  {
-                    id: 'listening', icon: '🎧', iconBg: '#dbeafe', label: 'Nghe Hiểu',
-                    getDesc: (f, b) => f === 'meaning' ? 'Ý nghĩa ↔ Phiên âm' : 'Phiên âm ↔ Ý nghĩa',
-                    frontKey: () => 'hiragana', backKey: () => 'meaning',
-                    isActive: (f, b) => (f === 'hiragana' && b === 'meaning') || (f === 'meaning' && b === 'hiragana')
-                  }
-                ]}
-              />
-            </div>
-          )}
+          <div className="mb-4">
+            <GameModeSelector
+              hasFourFields={hasFourFields}
+              currentContentType={currentContentType}
+              kanjiFront={kanjiMatchA}
+              setKanjiFront={setKanjiMatchA}
+              kanjiBack={kanjiMatchB}
+              setKanjiBack={setKanjiMatchB}
+              isReversed={isReversed}
+              setIsReversed={setIsReversed}
+              onSwap={handleSwap}
+              sectionLabel="Luật chơi (Game Rules)"
+              presets={[
+                {
+                  id: 'classic', icon: '🏛️', iconBg: '#ede9fe', label: 'Cổ điển',
+                  getDesc: (f, b, type) => { const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng'; return f === 'meaning' && (b === 'word' || b === 'kanji') ? `Ý nghĩa ↔ ${w}` : `${w} ↔ Ý nghĩa`; },
+                  frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'meaning',
+                  isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'meaning') || (f === 'meaning' && b === w); }
+                },
+                {
+                  id: 'speed', icon: '⚡', iconBg: '#fef3c7', label: 'Đua Tốc Độ',
+                  getDesc: (f, b, type) => { const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng'; return f === 'hiragana' && (b === 'word' || b === 'kanji') ? `Phiên âm ↔ ${w}` : `${w} ↔ Phiên âm`; },
+                  frontKey: (type) => type === 'kanji' ? 'kanji' : 'word', backKey: () => 'hiragana',
+                  isActive: (f, b, type) => { const w = type === 'kanji' ? 'kanji' : 'word'; return ((f === w) && b === 'hiragana') || (f === 'hiragana' && b === w); }
+                },
+                {
+                  id: 'hanviet', icon: '👑', iconBg: '#fee2e2', label: 'Vua Hán Tự',
+                  getDesc: (f, b) => f === 'meaning' && b === 'hanviet' ? 'Ý nghĩa ↔ Hán Việt' : 'Hán Việt ↔ Ý nghĩa',
+                  frontKey: () => 'hanviet', backKey: () => 'meaning',
+                  isActive: (f, b) => (f === 'hanviet' && b === 'meaning') || (f === 'meaning' && b === 'hanviet')
+                },
+                {
+                  id: 'listening', icon: '🎧', iconBg: '#dbeafe', label: 'Nghe Hiểu',
+                  getDesc: (f, b) => f === 'meaning' && b === 'hiragana' ? 'Ý nghĩa ↔ Phiên âm' : 'Phiên âm ↔ Ý nghĩa',
+                  frontKey: () => 'hiragana', backKey: () => 'meaning',
+                  isActive: (f, b) => (f === 'hiragana' && b === 'meaning') || (f === 'meaning' && b === 'hiragana')
+                }
+              ]}
+              twoFieldPresets={[
+                { id: 'forward', icon: '🧠', iconBg: '#ede9fe', label: 'Cổ Điển', description: 'Từ vựng ↔ Ý nghĩa', reversedValue: false },
+                { id: 'backward', icon: '🇻🇳', iconBg: '#fef3c7', label: 'Hồi Tưởng', description: 'Ý nghĩa ↔ Từ vựng', reversedValue: true },
+              ]}
+            />
+          </div>
 
           <div className="mb-4">
             <label className="form-label fw-bold text-muted">Độ khó (Số cặp thẻ):</label>
@@ -410,7 +421,10 @@ function MatchMode() {
             <button className={`btn btn-lg mt-2 fw-bold w-100 shadow-sm ${gameMode === 'challenge' ? 'btn-danger' : 'btn-primary'}`} onClick={startGame}>Chơi lại</button>
           </div>
         ) : (
-          <div className="row g-3 px-2">
+          <motion.div 
+            animate={isWrongMatch ? { x: [-10, 10, -10, 10, 0], transition: { duration: 0.4 } } : {}}
+            className={`row g-3 px-2 ${isWrongMatch ? 'screen-flash-error rounded-4' : ''}`}
+          >
             {cards.map(card => {
               const isSelected = selectedCards.some(c => c.id === card.id) && !successCards.includes(card.id);
               const isMatched = matchedIds.includes(card.matchId);
@@ -433,18 +447,25 @@ function MatchMode() {
               }
 
               if (isSelected) { cardClasses = 'bg-primary text-white'; cardStyles.border = '3px solid var(--bs-primary)'; }
-              else if (isError) { cardClasses = 'bg-danger text-white shake'; cardStyles.border = '3px solid #dc3545'; }
+              else if (isError) { cardClasses = 'bg-danger text-white'; cardStyles.border = '3px solid #dc3545'; }
               else if (isSuccess) { cardClasses = 'match-card-matched'; cardStyles.border = '3px solid #28a745'; }
 
               return (
                 <div className="col-6 col-md-4 col-lg-3 d-flex" key={card.id}>
-                  <div className={`card w-100 shadow-sm transition-all rounded-4 tap-effect match-card-ratio ${cardClasses}`} style={cardStyles} onClick={() => handleCardClick(card)}>
+                  <motion.div 
+                    animate={isError ? { scale: [1, 1.05, 0.95, 1], transition: { duration: 0.3 } } : {}}
+                    whileHover={!isSelected && !isSuccess && !isError ? { scale: 1.02 } : {}}
+                    whileTap={!isSelected && !isSuccess && !isError ? { scale: 0.95 } : {}}
+                    className={`card w-100 shadow-sm transition-all rounded-4 match-card-ratio ${cardClasses}`} 
+                    style={cardStyles} 
+                    onClick={() => handleCardClick(card)}
+                  >
                     <div className="card-body d-flex align-items-center justify-content-center p-3 text-wrap text-center w-100" style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{card.text}</div>
-                  </div>
+                  </motion.div>
                 </div>
               );
             })}
-          </div>
+          </motion.div>
         )}
       </div>
     </div>

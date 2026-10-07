@@ -1,25 +1,36 @@
 import { useState, useEffect } from "react";
-import { playSound } from '../utils/audio'; // Import bộ máy âm thanh
-import { motion, AnimatePresence } from 'framer-motion';
-import { Star, Volume2, BookOpen, Edit3 } from 'lucide-react'; // Thêm icons đẹp từ lucide-react
+import { playSound } from '../utils/audio';
+import { motion } from 'framer-motion';
+import { Star, Volume2, BookOpen, Edit3 } from 'lucide-react';
+import api from '../api/axiosConfig';
+import { toast } from 'react-toastify';
 
 function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false, kanjiFront = 'kanji', kanjiBack = 'meaning', onEdit, onSaveNote }) {
   const [flipped, setFlipped] = useState(false);
-  const [isStarred, setIsStarred] = useState(false); // Thêm trạng thái Star
+  const [isStarred, setIsStarred] = useState(vocab?.is_starred || false);
+
+  useEffect(() => {
+    if (vocab) setIsStarred(vocab.is_starred || false);
+  }, [vocab]);
 
   const handleOpenNote = (e) => {
     e.stopPropagation();
     if (onSaveNote && vocab) onSaveNote(vocab);
   };
 
-  const handleToggleStar = (e) => {
+  const handleToggleStar = async (e) => {
     e.stopPropagation();
-    setIsStarred(!isStarred);
-    playSound('pop'); // Có thể đổi thành âm thanh 'star' nếu có
-    // TODO: Gửi API lưu trạng thái star cho từ vựng này
+    const newStarState = !isStarred;
+    setIsStarred(newStarState);
+    playSound('pop'); 
+    try {
+      await api.put(`/vocabularies/${vocab.id}/star`, { is_starred: newStarState });
+    } catch (err) {
+      setIsStarred(!newStarState);
+      toast.error("Lỗi khi lưu trạng thái sao");
+    }
   };
 
-  // Bảo vệ trường hợp vocab bị rỗng khi component render sớm
   if (!vocab) return null;
 
   const detectLanguage = (text, field) => {
@@ -35,7 +46,7 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
   const backField = contentType === 'kanji' ? kanjiBack : (kanjiBack || (isReversed ? 'word' : 'meaning'));
 
   const getFallbackText = (field, isFront) => {
-    if (field === 'summary') return vocab.meaning; // Mặc định đọc ý nghĩa cho mặt summary
+    if (field === 'summary') return vocab.meaning;
     let text = vocab[field] || '';
     if (!text && (field === 'hanviet' || field === 'hiragana')) {
       text = isFront ? vocab.word : vocab.meaning;
@@ -50,33 +61,34 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
   const backLang = detectLanguage(backText, backField);
 
   const renderField = (field, isFront) => {
-    // --- XỬ LÝ MẶT SAU (TỔNG HỢP) TRÊN NỀN TÍM ---
     if (field === 'summary') {
+      const showKanji = frontField !== 'kanji' && frontField !== 'word';
+      const showHanviet = frontField !== 'hanviet';
+      const showHiragana = frontField !== 'hiragana';
+      const showMeaning = frontField !== 'meaning';
+
       return (
         <div className="d-flex flex-column gap-3 text-center w-100 align-items-center justify-content-center h-100">
-          {/* Hán Việt: Dùng màu vàng sáng để nổi trên nền tím */}
-          {vocab.hanviet && (
+          {showKanji && (vocab.kanji || vocab.word) && (
+            <div className="fw-bold text-white" style={{ fontSize: '2.2rem', fontFamily: '"Yu Mincho", "MS Mincho", serif', textShadow: '0 2px 4px rgba(0,0,0,0.2)' }}>
+              {vocab.kanji || vocab.word}
+            </div>
+          )}
+          {showHanviet && vocab.hanviet && (
             <div className="fw-bold text-uppercase" style={{ color: '#ffd700', fontSize: '1.2rem', letterSpacing: '4px' }}>
               [{vocab.hanviet}]
             </div>
           )}
-          
-          {/* Phiên âm: Dùng màu cyan/bạc hà nhạt cho dễ đọc */}
-          {vocab.hiragana && (
+          {showHiragana && vocab.hiragana && (
             <div className="fw-bold" style={{ color: '#00f2fe', fontSize: '1.8rem' }}>
               {vocab.hiragana}
             </div>
           )}
-          
-          {/* Vạch ngăn cách mỏng màu trắng */}
-          {(vocab.hanviet || vocab.hiragana) && (
-            <div className="my-2 bg-white rounded-pill" style={{ width: '40px', height: '4px', opacity: 0.5 }} />
+          {showMeaning && vocab.meaning && (
+            <div className="text-white fw-bold" style={{ fontSize: '1.8rem', textShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
+              {vocab.meaning}
+            </div>
           )}
-          
-          {/* Ý nghĩa: Màu trắng tinh, font chữ to rõ ràng */}
-          <div className="text-white fw-bold" style={{ fontSize: '2rem', textShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
-            {vocab.meaning}
-          </div>
         </div>
       );
     }
@@ -86,7 +98,6 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
         displayField = isFront ? 'word' : 'meaning';
     }
 
-    // --- XỬ LÝ MẶT TRƯỚC (CHỈ HIỆN KANJI/TỪ VỰNG GỐC) ---
     if (displayField === 'kanji' || displayField === 'word') {
       return (
         <div className="d-flex flex-column align-items-center justify-content-center w-100 h-100">
@@ -97,7 +108,6 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
       );
     }
     
-    // Fallback cho các trường hợp thẻ đảo ngược
     if (displayField === 'hanviet') {
       return <div className="fw-bold h-100 d-flex align-items-center justify-content-center" style={{ color: isFront ? '#863bff' : '#ffd700', fontSize: '2rem', letterSpacing: '2px' }}>{vocab[displayField]}</div>;
     }
@@ -134,7 +144,6 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
     speak(text, lang);
   };
 
-  // Nút Star
   const renderStarButton = () => (
     <button 
       className="btn btn-light position-absolute top-0 start-0 m-3 rounded-circle border-0 d-flex align-items-center justify-content-center tap-effect"
@@ -160,13 +169,12 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
         transition={{ type: "spring", stiffness: 200, damping: 20, mass: 1 }}
         style={{ transformStyle: "preserve-3d" }}
       >
-        {/* === MẶT TRƯỚC === */}
         <div 
           className="position-absolute w-100 h-100 d-flex flex-column rounded-4 bg-white"
           style={{ 
             backfaceVisibility: 'hidden',
             border: '2px solid #f3f4f6',
-            boxShadow: '0 12px 24px -6px rgba(0,0,0,0.08), 0 4px 8px -4px rgba(0,0,0,0.04), inset 0 -4px 0 rgba(0,0,0,0.02)', // Drop shadow sâu ở dưới
+            boxShadow: '0 12px 24px -6px rgba(0,0,0,0.08), 0 4px 8px -4px rgba(0,0,0,0.04), inset 0 -4px 0 rgba(0,0,0,0.02)',
             overflow: 'hidden'
           }}
         >
@@ -192,7 +200,6 @@ function Flashcard({ vocab, autoPlay, contentType = 'vocab', isReversed = false,
           </div>
         </div>
 
-        {/* === MẶT SAU === */}
         <div 
           className="position-absolute w-100 h-100 d-flex flex-column rounded-4"
           style={{ 

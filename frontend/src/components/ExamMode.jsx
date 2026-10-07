@@ -29,10 +29,14 @@ function ExamMode() {
   const [importText, setImportText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  // ĐỌC LỊCH SỬ TỪ LOCAL STORAGE THEO TÊN MIỀN
-  const fetchHistory = () => {
-    const historyData = JSON.parse(localStorage.getItem('scofieldExamHistory') || '[]');
-    setHistory(historyData);
+  // ĐỌC LỊCH SỬ TỪ API
+  const fetchHistory = async () => {
+    try {
+      const res = await api.get('/exams/history/all');
+      setHistory(res.data);
+    } catch (error) {
+      console.error("Lỗi lấy lịch sử:", error);
+    }
   };
 
   const fetchExamsList = async () => {
@@ -49,11 +53,15 @@ function ExamMode() {
     fetchHistory();
   }, []);
 
-  const handleClearHistory = () => {
-    if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử làm bài trên tên miền này?")) {
-      localStorage.removeItem('scofieldExamHistory');
-      setHistory([]);
-      toast.success("Đã xóa lịch sử thành công!");
+  const handleClearHistory = async () => {
+    if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử làm bài?")) {
+      try {
+        await api.delete('/exams/history/all');
+        setHistory([]);
+        toast.success("Đã xóa lịch sử thành công!");
+      } catch (error) {
+        toast.error("Lỗi khi xóa lịch sử");
+      }
     }
   };
 

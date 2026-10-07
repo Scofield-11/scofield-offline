@@ -610,7 +610,7 @@ function TestMode() {
 
           {/* BẢNG ĐIỀU HƯỚNG BÊN PHẢI */}
           <div className="col-lg-4 d-print-none">
-            <div className="card shadow-sm border-0 sticky-top" style={{ top: '20px', zIndex: 1000, borderRadius: '24px' }}>
+            <div className="card shadow-sm border-0 shadow-lg sticky-top" style={{ borderRadius: '24px', top: '20px', zIndex: 1000 }}>
               <div className="card-body p-4">
                 <h5 className="mb-3 text-center fw-bold text-dark">Bảng điều hướng</h5>
                 <p className="text-center text-muted small mb-3">Đã hoàn thành: <strong>{answeredCount} / {questions.length}</strong></p>

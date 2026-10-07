@@ -34,6 +34,15 @@ function FlashcardMode() {
 
   const currentContentType = (targetSets.length > 0 && targetSets.every(s => s.type === 'kanji')) ? 'kanji' : 'vocab';
 
+  const hasFourFields = (() => {
+    if (currentContentType === 'kanji') return true;
+    if (String(selectedSetId).includes('ja') || String(selectedSetId).includes('kanji')) return true;
+    if (targetSets.length > 0) {
+      return targetSets.some(s => s.language === 'ja' || s.type === 'kanji' || (s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana)));
+    }
+    return false;
+  })();
+
   useEffect(() => { fetchSets(); }, [fetchSets]);
   
   const [vocabsToStudy, setVocabsToStudy] = useState([]);
@@ -48,14 +57,16 @@ function FlashcardMode() {
   const [isSlideshow, setIsSlideshow] = useState(false);
   const [isReversed, setIsReversed] = useState(false);
   const [kanjiFront, setKanjiFront] = useState('kanji');
-  const [kanjiBack, setKanjiBack] = useState('meaning');
+  const [kanjiBack, setKanjiBack] = useState('summary'); // Mặc định mặt sau là Hiện toàn bộ thông tin
   
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const handleSwap = () => {
-    if (contentType === 'kanji') {
-      setKanjiFront(kanjiBack);
-      setKanjiBack(kanjiFront);
+    if (hasFourFields) {
+      const w = currentContentType === 'kanji' ? 'kanji' : 'word';
+      // Cố định mặt sau luôn là 'summary', chỉ đảo mặt trước giữa Từ vựng và Ý nghĩa
+      setKanjiFront(kanjiFront === w ? 'meaning' : w);
+      setKanjiBack('summary');
     } else {
       setIsReversed(!isReversed);
     }
@@ -220,30 +231,13 @@ function FlashcardMode() {
     } catch (err) { toast.error("Lỗi khi lưu!"); }
   };
 
-  const hasFourFields = (() => {
-    if (currentContentType === 'kanji') return true;
-    if (String(selectedSetId) === 'lang_ja' || String(selectedSetId) === 'all_ja') return true;
-    if (targetSets.length > 0) {
-      return targetSets.some(s => s.vocabularies && s.vocabularies.some(v => v.hanviet || v.hiragana));
-    }
-    return false;
-  })();
 
-  const handleSwapClick = () => {
-    if (hasFourFields) {
-      const temp = kanjiFront;
-      setKanjiFront(kanjiBack === 'summary' ? 'meaning' : kanjiBack);
-      setKanjiBack(temp);
-    } else {
-      handleSwap();
-    }
-  };
 
   if (loading) return <LoadingSkeleton />;
 
   if (!isStarted) {
     return (
-      <div className="container mt-5 fade-in-slide" style={{ maxWidth: '600px' }}>
+      <div className="container mt-5 fade-in-slide" style={{ maxWidth: '700px' }}>
         <div className="card shadow-sm border-0 p-4 p-md-5 rounded-4 bg-white" style={{ borderRadius: '24px' }}>
           <h3 className="text-center mb-5 fw-bold text-dark" style={{ opacity: 0.8 }}>Thiết lập Flashcards</h3>
           
@@ -268,9 +262,61 @@ function FlashcardMode() {
               setKanjiBack={setKanjiBack}
               onSwap={handleSwap}
               sectionLabel="Chọn chế độ lật thẻ"
+              presets={[
+                {
+                  id: 'recognition',
+                  icon: '🧠',
+                  iconBg: '#ede9fe',
+                  label: 'Nhận diện (Đọc hiểu)',
+                  getDesc: (f, b, type) => {
+                    const w = type === 'kanji' ? 'Hán tự' : 'Từ vựng';
+                    return `Nhìn ${w} ➔ Hiện toàn bộ thông tin`;
+                  },
+                  frontKey: (type) => type === 'kanji' ? 'kanji' : 'word',
+                  backKey: () => 'summary',
+                  isActive: (f, b, type) => {
+                    const w = type === 'kanji' ? 'kanji' : 'word';
+                    return f === w && b === 'summary';
+                  }
+                },
+                {
+                  id: 'recall',
+                  icon: '🇻🇳',
+                  iconBg: '#fef3c7',
+                  label: 'Hồi tưởng (Sản sinh)',
+                  getDesc: (f, b, type) => {
+                    return `Nhìn Ý nghĩa ➔ Hiện toàn bộ thông tin`;
+                  },
+                  frontKey: () => 'meaning',
+                  backKey: () => 'summary',
+                  isActive: (f, b, type) => {
+                    return f === 'meaning' && b === 'summary';
+                  }
+                },
+                {
+                  id: 'reading',
+                  icon: '🗣️',
+                  iconBg: '#dbeafe',
+                  label: 'Luyện đọc Âm',
+                  getDesc: () => 'Nhìn Phiên âm ➔ Hiện toàn bộ thông tin',
+                  frontKey: () => 'hiragana',
+                  backKey: () => 'summary',
+                  isActive: (f, b) => f === 'hiragana' && b === 'summary'
+                },
+                {
+                  id: 'hanviet',
+                  icon: '👑',
+                  iconBg: '#fee2e2',
+                  label: 'Ôn tập Hán Việt',
+                  getDesc: () => 'Nhìn Hán Việt ➔ Hiện toàn bộ thông tin',
+                  frontKey: () => 'hanviet',
+                  backKey: () => 'summary',
+                  isActive: (f, b) => f === 'hanviet' && b === 'summary'
+                }
+              ]}
               twoFieldPresets={[
-                { id: 'forward', icon: '🧠', iconBg: '#ede9fe', label: 'Học Toàn Diện', description: 'Nhìn Từ vựng ➔ Đoán Ý nghĩa', reversedValue: false },
-                { id: 'backward', icon: '🇻🇳', iconBg: '#fef3c7', label: 'Hồi Tưởng', description: 'Nhìn Ý nghĩa ➔ Đoán Từ vựng', reversedValue: true },
+                { id: 'forward', icon: '🧠', iconBg: '#ede9fe', label: 'Học Toàn Diện', description: 'Nhìn Từ vựng ➔ Xem Ý nghĩa', reversedValue: false },
+                { id: 'backward', icon: '🇻🇳', iconBg: '#fef3c7', label: 'Hồi Tưởng', description: 'Nhìn Ý nghĩa ➔ Xem Từ vựng', reversedValue: true },
               ]}
             />
           </div>
@@ -375,8 +421,7 @@ function FlashcardMode() {
           contentType={currentContentType}
           isReversed={isReversed}
           kanjiFront={kanjiFront}
-          // NẾU LÀ TIẾNG NHẬT THÌ ÉP MẶT SAU LÀ SUMMARY
-          kanjiBack={hasFourFields ? 'summary' : kanjiBack}
+          kanjiBack={kanjiBack}
           onEdit={setEditingVocab}
           onSaveNote={(item) => {
             if (currentContentType === 'kanji') {
