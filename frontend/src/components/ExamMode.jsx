@@ -43,7 +43,7 @@ function ExamMode() {
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
       downloadAnchorNode.setAttribute("download", "scofield_offline_data.json");
-      document.body.appendChild(downloadAnchorNode); // Dành cho firefox
+      document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
       toast.success("Đã tải xuống dữ liệu thành công!");
