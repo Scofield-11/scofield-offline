@@ -38,7 +38,9 @@ function ExamTaking({ examData, isInstantFeedback, backToList, fetchHistory, ope
 
     // LƯU LỊCH SỬ THÔNG QUA API
     try {
-      await api.post(`/exams/${examData.id}/history`, {
+      await api.post(`/test-history`, {
+        set_id: null,
+        title: `Đề thi: ${examData.title}`,
         score: scoreCount,
         total: examData.questions.length,
         wrong_details: wrongDetails

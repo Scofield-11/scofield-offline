@@ -88,17 +88,20 @@ function ExamMode() {
   // ĐỌC LỊCH SỬ TỪ API
   const fetchHistory = async () => {
     try {
-      const res = await api.get('/exams/history/all');
-      setHistory(res.data);
+      // Dùng chung bảng lịch sử với TestMode cho bản offline
+      const res = await api.get('/test-history');
+      // Đảm bảo dữ liệu luôn là mảng để không bị sập (trắng trang)
+      setHistory(Array.isArray(res.data) ? res.data : []); 
     } catch (error) {
       console.error("Lỗi lấy lịch sử:", error);
+      setHistory([]);
     }
   };
 
   const fetchExamsList = async () => {
     try {
       const res = await api.get("/exams");
-      setExams(res.data);
+      setExams(Array.isArray(res.data) ? res.data : []);
     } catch (error) {
       console.error("Lỗi lấy danh sách đề thi:", error);
     }
