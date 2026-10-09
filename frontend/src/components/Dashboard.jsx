@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useContext } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/axiosConfig';
 import { VocabContext } from '../context/VocabContext';
+import localforage from 'localforage';
+import { toast } from 'react-toastify';
 
 function Dashboard() {
   const { sets } = useContext(VocabContext);
@@ -13,6 +15,63 @@ function Dashboard() {
 
   const [todayTests, setTodayTests] = useState(0);
   const [currentStreak, setCurrentStreak] = useState(0);
+
+  const fileInputRef = useRef(null);
+
+  // HÀM XUẤT DỮ LIỆU
+  const handleExportJSON = async () => {
+    try {
+      let db = await localforage.getItem('db');
+      if (!db) {
+        toast.warning("Chưa có dữ liệu nào để xuất!");
+        return;
+      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", "scofield_offline_data.json");
+      document.body.appendChild(downloadAnchorNode); // Dành cho firefox
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      toast.success("Đã tải xuống dữ liệu thành công!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Có lỗi xảy ra khi xuất dữ liệu.");
+    }
+  };
+
+  // HÀM NHẬP DỮ LIỆU
+  const handleImportJSON = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const importedData = JSON.parse(event.target.result);
+        
+        // Kiểm tra xem file có cấu trúc db offline không
+        if (!importedData.sets || !importedData.vocabularies) {
+           toast.error("File JSON không đúng cấu trúc của Scofield Offline!");
+           return;
+        }
+
+        if (window.confirm("Hành động này sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại bằng dữ liệu từ file. Bạn có chắc chắn không?")) {
+           await localforage.setItem('db', importedData);
+           toast.success("Đồng bộ dữ liệu thành công! Đang tải lại trang...");
+           setTimeout(() => {
+             window.location.reload();
+           }, 1500);
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error('Lỗi định dạng JSON hoặc dữ liệu bị hỏng!');
+      }
+    };
+    reader.readAsText(file);
+    // Reset input để có thể import lại cùng 1 file
+    e.target.value = null; 
+  };
 
   useEffect(() => {
     // Lấy 100 lịch sử gần nhất để tính toán chuỗi liên tiếp và bài làm hôm nay
@@ -195,8 +254,31 @@ function Dashboard() {
         </div>
 
         <div className="col-lg-6">
+          {/* Export / Import Database Offline */}
+          <div className="d-flex gap-3 mb-4">
+             <input 
+                type="file" 
+                accept=".json" 
+                ref={fileInputRef} 
+                style={{ display: 'none' }} 
+                onChange={handleImportJSON} 
+             />
+             <button 
+                className="btn btn-outline-primary fw-bold flex-grow-1 shadow-sm rounded-pill"
+                onClick={handleExportJSON}
+             >
+                ⬇️ Lưu file Backup
+             </button>
+             <button 
+                className="btn btn-outline-success fw-bold flex-grow-1 shadow-sm rounded-pill"
+                onClick={() => fileInputRef.current.click()}
+             >
+                ⬆️ Đồng bộ lên máy
+             </button>
+          </div>
+
           {/* Quick Actions */}
-          <div className="d-flex gap-3 h-100">
+          <div className="d-flex gap-3" style={{ height: 'calc(100% - 60px)' }}>
             <Link to="/flashcards" className="btn bg-white border w-50 py-4 fw-bold text-primary shadow-sm rounded-4 d-flex align-items-center justify-content-center flex-column hover-bg-light transition-all h-100">
               <span className="display-6 mb-2">🗂️</span>
               <span className="fs-5 mt-1">Flashcards</span>
