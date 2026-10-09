@@ -115,7 +115,7 @@ function ExamMode() {
   const handleClearHistory = async () => {
     if (window.confirm("Bạn có chắc chắn muốn xóa toàn bộ lịch sử làm bài?")) {
       try {
-        await api.delete('/exams/history/all');
+        await api.delete('/test-history/all'); // Dùng endpoint thống nhất
         setHistory([]);
         toast.success("Đã xóa lịch sử thành công!");
       } catch (error) {

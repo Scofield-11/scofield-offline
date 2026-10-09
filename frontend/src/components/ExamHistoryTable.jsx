@@ -11,7 +11,9 @@ function ExamHistoryTable({ history, setViewHistory, handleClearHistory, onLoadM
 
   // Nhóm lịch sử theo ngày (Xử lý tương thích cả 2 định dạng cũ/mới)
   const groupedHistory = history.reduce((acc, record) => {
-    const dateKey = record.date.includes(' - ') ? record.date.split(' - ')[1] : record.date;
+    // Thêm fallback an toàn trong trường hợp record.date bị undefined
+    const safeDate = record.date || '';
+    const dateKey = safeDate.includes(' - ') ? safeDate.split(' - ')[1] : (safeDate || 'Không rõ ngày');
     if (!acc[dateKey]) acc[dateKey] = [];
     acc[dateKey].push(record);
     return acc;

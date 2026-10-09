@@ -12,6 +12,14 @@ const getDB = async () => {
   if (!db) {
     db = { sets: [], vocabularies: [], kanjiSets: [], kanjis: [], exams: [], testHistories: [] };
     await localforage.setItem('db', db);
+  } else {
+    // Đảm bảo tương thích ngược với DB cũ, tự động thêm mảng nếu bị thiếu
+    let isUpdated = false;
+    if (!db.exams) { db.exams = []; isUpdated = true; }
+    if (!db.testHistories) { db.testHistories = []; isUpdated = true; }
+    if (!db.kanjiSets) { db.kanjiSets = []; isUpdated = true; }
+    if (!db.kanjis) { db.kanjis = []; isUpdated = true; }
+    if (isUpdated) await localforage.setItem('db', db);
   }
   return db;
 };
