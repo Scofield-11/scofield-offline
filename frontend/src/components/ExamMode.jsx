@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import api from '../api/axiosConfig';
 import { toast } from 'react-toastify';
 import ExamList from './ExamList';
@@ -8,6 +8,7 @@ import ExamImportModal from './ExamImportModal';
 import ExamSaveModal from './ExamSaveModal';
 import ExamEditForm from './ExamEditForm';
 import ExamHistoryTable from './ExamHistoryTable';
+import localforage from 'localforage';
 
 function ExamMode() {
   const [editingExamId, setEditingExamId] = useState(null);
@@ -28,6 +29,61 @@ function ExamMode() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importText, setImportText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const fileInputRef = useRef(null);
+
+  // HÀM XUẤT DỮ LIỆU
+  const handleExportJSON = async () => {
+    try {
+      let db = await localforage.getItem('db');
+      if (!db) {
+        toast.warning("Chưa có dữ liệu nào để xuất!");
+        return;
+      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(db, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", "scofield_offline_data.json");
+      document.body.appendChild(downloadAnchorNode); // Dành cho firefox
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      toast.success("Đã tải xuống dữ liệu thành công!");
+    } catch (error) {
+      console.error(error);
+      toast.error("Có lỗi xảy ra khi xuất dữ liệu.");
+    }
+  };
+
+  // HÀM NHẬP DỮ LIỆU
+  const handleImportJSON = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const importedData = JSON.parse(event.target.result);
+        
+        // Kiểm tra xem file có đúng cấu trúc offline không
+        if (!importedData.sets || !importedData.vocabularies) {
+           toast.error("File JSON không đúng cấu trúc của Scofield Offline!");
+           return;
+        }
+
+        if (window.confirm("Hành động này sẽ GHI ĐÈ toàn bộ dữ liệu hiện tại bằng dữ liệu từ file. Bạn có chắc chắn không?")) {
+           await localforage.setItem('db', importedData);
+           toast.success("Đồng bộ dữ liệu thành công! Đang tải lại trang...");
+           setTimeout(() => {
+             window.location.reload();
+           }, 1500);
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error('Lỗi định dạng JSON hoặc dữ liệu bị hỏng!');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null; // Reset input để có thể import lại
+  };
 
   // ĐỌC LỊCH SỬ TỪ API
   const fetchHistory = async () => {
@@ -300,6 +356,31 @@ function ExamMode() {
   return (
     <div className="container mt-5" style={{ maxWidth: '900px' }}>
       <ExamImportModal show={showImportModal} onClose={() => setShowImportModal(false)} importText={importText} setImportText={setImportText} onImport={handleImportToEdit} />
+
+      {/* Export / Import Database Offline */}
+      {!examData && !editingExamId && !viewHistory && (
+        <div className="d-flex gap-3 mb-4">
+           <input 
+              type="file" 
+              accept=".json" 
+              ref={fileInputRef} 
+              style={{ display: 'none' }} 
+              onChange={handleImportJSON} 
+           />
+           <button 
+              className="btn btn-outline-primary fw-bold flex-grow-1 shadow-sm rounded-pill"
+              onClick={handleExportJSON}
+           >
+              ⬇️ Lưu file Backup
+           </button>
+           <button 
+              className="btn btn-outline-success fw-bold flex-grow-1 shadow-sm rounded-pill"
+              onClick={() => fileInputRef.current.click()}
+           >
+              ⬆️ Đồng bộ lên máy
+           </button>
+        </div>
+      )}
       
       {editingExamId ? (
         <ExamEditForm 
