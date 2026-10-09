@@ -14,6 +14,7 @@ export default defineConfig({
         theme_color: '#863bff',
         background_color: '#f6f7fb',
         display: 'standalone', // Bắt buộc để iPhone ẩn thanh địa chỉ
+        start_url: '/',
         icons: [
           {
             src: '/logo-180.jpg',
